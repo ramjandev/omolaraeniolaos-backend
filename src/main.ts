@@ -1,0 +1,79 @@
+import './shim';
+import { NestFactory, Reflector } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AppModule } from './app.module';
+import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  // Global API Prefix
+  app.setGlobalPrefix('api');
+
+  // Enable CORS
+  app.enableCors({
+    origin: true,
+    credentials: true,
+  });
+
+  // Global DTO Validation Pipe
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: false,
+    }),
+  );
+
+  // Global Response Transform Interceptor
+  const reflector = app.get(Reflector);
+  app.useGlobalInterceptors(new TransformInterceptor(reflector));
+
+  // Global Exception Filter
+  app.useGlobalFilters(new HttpExceptionFilter());
+
+  // OpenAPI / Swagger Documentation
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Innosight Event Management OS API')
+    .setDescription(
+      `
+### Enterprise NestJS Event Management Platform
+Architecture for all 6 ecosystem roles:
+- **Organizer (Individual)**: Events catalog, ticket tier pricing, attendee management, and broadcasts.
+- **Organizer (Agency)**: Corporate retainer accounts, production crew assignments, and B2B billing.
+- **Organizer (Venue)**: Spaces leasing, bookings calendar, and banquet table layouts.
+- **Gate Staff**: High-concurrency QR scanner validation and shift logs.
+- **Guest**: Attendee passes, session schedules, and profile.
+- **Super Admin**: Ecosystem telemetry matching Figma dashboard (142 Organizers, 847 Events, ₦4.2M Revenue).
+      `,
+    )
+    .setVersion('1.0.0')
+    .addBearerAuth()
+    .build();
+
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document, {
+    customSiteTitle: 'Innosight API Documentation',
+    swaggerOptions: {
+      persistAuthorization: true,
+      docExpansion: 'list',
+    },
+  });
+
+  // Secondary convenient route
+  SwaggerModule.setup('docs', app, document);
+
+  const PORT = Number(process.env.PORT) || 5000;
+
+  await app.listen(PORT, '0.0.0.0');
+
+  console.log(`=================================================`);
+  console.log(`🚀 NestJS Innosight Platform Backend Running`);
+  console.log(`📡 Base URL: http://localhost:${PORT}/api`);
+  console.log(`📖 Swagger API Documentation: http://localhost:${PORT}/api/docs`);
+  console.log(`=================================================`);
+}
+
+bootstrap();

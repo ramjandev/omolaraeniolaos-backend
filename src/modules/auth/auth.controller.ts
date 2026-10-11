@@ -1,0 +1,147 @@
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Inject,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiBody,
+} from '@nestjs/swagger';
+import { AuthService } from './auth.service';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { AuthResponseDto, TokenResponseDto } from './dto/auth-response.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CurrentUserDto } from '../../common/dto/current-user.dto';
+import { ResponseMessage } from '../../common/decorators/response-message.decorator';
+
+@ApiTags('Authentication')
+@Controller('auth')
+export class AuthController {
+  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
+
+  @Post('register')
+  @ResponseMessage('User registered successfully')
+  @ApiOperation({
+    summary:
+      'Register a new user account (Individual, Agency, Venue, Staff, or Guest)',
+  })
+  @ApiBody({ type: RegisterDto })
+  @ApiResponse({
+    status: 201,
+    description: 'User account created with access and refresh tokens',
+    type: AuthResponseDto,
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Account with this email already exists',
+  })
+  async register(@Body() dto: RegisterDto): Promise<AuthResponseDto> {
+    return this.authService.register(dto);
+  }
+
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('User logged in successfully')
+  @ApiOperation({ summary: 'Authenticate user and retrieve access + refresh tokens' })
+  @ApiBody({ type: LoginDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Authenticated successfully',
+    type: AuthResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Invalid email or password' })
+  async login(@Body() dto: LoginDto): Promise<AuthResponseDto> {
+    return this.authService.login(dto);
+  }
+
+  @Post('refresh-token')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Access token refreshed successfully')
+  @ApiOperation({
+    summary:
+      'Obtain a new short-lived access token using a valid 7-day refresh token',
+  })
+  @ApiBody({ type: RefreshTokenDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Tokens refreshed successfully',
+    type: TokenResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Refresh token is expired or invalid',
+  })
+  async refreshToken(@Body() dto: RefreshTokenDto): Promise<TokenResponseDto> {
+    return this.authService.refreshToken(dto);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage(
+    'If an account with that email exists, password reset instructions have been sent via email',
+  )
+  @ApiOperation({
+    summary:
+      'Request a time-limited (1h) password reset link sent via Resend email service',
+  })
+  @ApiBody({ type: ForgotPasswordDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Reset request processed and email dispatched',
+  })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage(
+    'Password has been reset successfully. You may now log in with your new password.',
+  )
+  @ApiOperation({
+    summary:
+      'Validate time-limited reset token and update account password',
+  })
+  @ApiBody({ type: ResetPasswordDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset and updated successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid or expired password reset token',
+  })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ResponseMessage('User profile retrieved successfully')
+  @ApiOperation({
+    summary:
+      'Retrieve currently authenticated user session and role profile',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User profile retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getProfile(@CurrentUser() user: CurrentUserDto) {
+    return this.authService.getProfile(user.id);
+  }
+}

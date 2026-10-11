@@ -1,0 +1,729 @@
+// =============================================================================
+// Prisma Schema: Multi-Role Event Management Platform (Innosight / McEniesVite)
+// Covers: Organizer (Individual, Agency, Venue), Admin, Gate Staff, and Guests
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum UserRole {
+  SUPER_ADMIN
+  ORGANIZER_INDIVIDUAL
+  ORGANIZER_AGENCY
+  ORGANIZER_VENUE
+  GATE_STAFF
+  GUEST
+}
+
+enum UserStatus {
+  ACTIVE
+  PENDING_VERIFICATION
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  LIVE
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+enum EventFormat {
+  IN_PERSON
+  VIRTUAL
+  HYBRID
+}
+
+enum TicketTierType {
+  FREE
+  EARLY_BIRD
+  GENERAL
+  VIP
+  SPEAKER
+  SPONSOR
+  BACKSTAGE
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentGateway {
+  STRIPE
+  PAYSTACK
+  FLUTTERWAVE
+  BANK_TRANSFER
+}
+
+enum AttendeeStatus {
+  PENDING
+  ATTENDING
+  CHECKED_IN
+  CANCELLED
+  NO_SHOW
+}
+
+enum CommunicationChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  PUSH_NOTIFICATION
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+}
+
+enum SpaceType {
+  BALLROOM
+  AUDITORIUM
+  TERRACE
+  BOARDROOM
+  EXHIBITION_HALL
+  BANQUET_HALL
+  ROOFTOP
+}
+
+enum SpaceStatus {
+  AVAILABLE
+  BOOKED
+  MAINTENANCE
+  CLOSED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum TableShape {
+  ROUND
+  RECTANGLE
+  SQUARE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// -----------------------------------------------------------------------------
+// 1. USER & IDENTITY DOMAIN
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String      @id @default(uuid())
+  email         String      @unique
+  passwordHash  String
+  fullName      String
+  phone         String?
+  avatarUrl     String?
+  role          UserRole    @default(GUEST)
+  status        UserStatus  @default(ACTIVE)
+  emailVerified DateTime?
+  phoneVerified DateTime?
+
+  // Extended Profile Relations
+  profile       UserProfile?
+  agencyProfile AgencyProfile?
+  venueProfile  VenueProfile?
+  staffProfile  GateStaffProfile?
+
+  // Core App Relations
+  eventsCreated Event[]               @relation("EventOrganizer")
+  ordersPlaced  Order[]               @relation("BuyerOrders")
+  attendances   Attendee[]            @relation("UserAttendances")
+  auditLogs     PlatformAuditLog[]    @relation("UserAuditLogs")
+  teamMembers   AgencyTeamMember[]    @relation("UserTeamMembers")
+  notifications NotificationMessage[]
+
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([email])
+  @@index([role])
+}
+
+model UserProfile {
+  id                   String   @id @default(uuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio                  String?  @db.Text
+  company              String?
+  jobTitle             String?
+  websiteUrl           String?
+  dietaryPreference    String?
+  accessibilityNotes   String?  @db.Text
+  notificationEmail    Boolean  @default(true)
+  notificationSms      Boolean  @default(true)
+  notificationMarketing Boolean @default(false)
+  updatedAt            DateTime @updatedAt
+}
+
+// -----------------------------------------------------------------------------
+// 2. AGENCY & MULTI-CLIENT DOMAIN
+// -----------------------------------------------------------------------------
+
+model AgencyProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agencyName      String
+  corporateTaxId  String?
+  billingEmail    String
+  standardCommission Float @default(15.0)
+  headquarters    String?
+  website         String?
+
+  clients         AgencyClient[]
+  teamMembers     AgencyTeamMember[]
+  invoices        AgencyInvoice[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AgencyClient {
+  id             String         @id @default(uuid())
+  agencyId       String
+  agency         AgencyProfile  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  name           String
+  industry       String
+  contactPerson  String
+  contactEmail   String
+  contactPhone   String?
+  logoUrl        String?
+  status         String         @default("active") // active, on_hold, pending
+  contractTotal  Float          @default(0.0)
+  currency       String         @default("USD")
+
+  events         Event[]        @relation("ClientEvents")
+  invoices       AgencyInvoice[]
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([agencyId])
+}
+
+model AgencyTeamMember {
+  id           String        @id @default(uuid())
+  agencyId     String
+  agency       AgencyProfile @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User          @relation("UserTeamMembers", fields: [userId], references: [id], onDelete: Cascade)
+  roleTitle    String        // e.g., Senior Producer, Stage Director
+  permissions  Json          // Structured permissions array
+  isOnline     Boolean       @default(false)
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([agencyId, userId])
+}
+
+model AgencyInvoice {
+  id            String        @id @default(uuid())
+  agencyId      String
+  agency        AgencyProfile @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  clientId      String
+  client        AgencyClient  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  eventId       String?
+  event         Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  invoiceNumber String        @unique
+  amount        Float
+  currency      String        @default("USD")
+  issueDate     DateTime      @default(now())
+  dueDate       DateTime
+  paidAt        DateTime?
+  status        InvoiceStatus @default(PENDING)
+  notes         String?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([agencyId])
+  @@index([clientId])
+}
+
+// -----------------------------------------------------------------------------
+// 3. VENUE, SPACES & TABLE LAYOUTS DOMAIN
+// -----------------------------------------------------------------------------
+
+model VenueProfile {
+  id               String       @id @default(uuid())
+  userId           String       @unique
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyName     String
+  address          String
+  city             String
+  state            String?
+  country          String
+  securityHotline  String?
+  compoundCapacity Int          @default(5000)
+
+  spaces           VenueSpace[]
+  bookings         VenueBooking[]
+
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model VenueSpace {
+  id           String         @id @default(uuid())
+  venueId      String
+  venue        VenueProfile   @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  name         String
+  type         SpaceType      @default(BALLROOM)
+  capacity     Int
+  squareMeters Float
+  hourlyRate   Float?
+  dailyRate    Float
+  currency     String         @default("USD")
+  status       SpaceStatus    @default(AVAILABLE)
+  imageUrl     String?
+  amenities    String[]       // Array of feature tags
+
+  bookings     VenueBooking[]
+  eventsHosted Event[]
+  tableZones   TableZone[]
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([venueId])
+}
+
+model VenueBooking {
+  id             String        @id @default(uuid())
+  bookingCode    String        @unique
+  venueId        String
+  venue          VenueProfile  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  spaceId        String
+  space          VenueSpace    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  eventId        String?
+  event          Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  clientName     String
+  contactEmail   String
+  startDate      DateTime
+  endDate        DateTime
+  totalGuests    Int
+  totalAmount    Float
+  securityDeposit Float        @default(0.0)
+  currency       String        @default("USD")
+  status         BookingStatus @default(PENDING)
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([venueId])
+  @@index([spaceId])
+}
+
+model TableZone {
+  id            String            @id @default(uuid())
+  spaceId       String?
+  space         VenueSpace?       @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  eventId       String?
+  event         Event?            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  zoneName      String
+  tableCount    Int
+  seatPerTable  Int
+  totalCapacity Int
+  shape         TableShape        @default(ROUND)
+
+  assignments   TableAssignment[]
+
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([spaceId])
+  @@index([eventId])
+}
+
+model TableAssignment {
+  id          String     @id @default(uuid())
+  zoneId      String
+  zone        TableZone  @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  attendeeId  String     @unique
+  attendee    Attendee   @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+  tableNumber Int
+  seatNumber  Int?
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+// -----------------------------------------------------------------------------
+// 4. EVENT DOMAIN
+// -----------------------------------------------------------------------------
+
+model Event {
+  id               String          @id @default(uuid())
+  organizerId      String
+  organizer        User            @relation("EventOrganizer", fields: [organizerId], references: [id], onDelete: Cascade)
+  agencyClientId   String?
+  agencyClient     AgencyClient?   @relation("ClientEvents", fields: [agencyClientId], references: [id], onDelete: SetNull)
+  venueSpaceId     String?
+  venueSpace       VenueSpace?     @relation(fields: [venueSpaceId], references: [id], onDelete: SetNull)
+
+  title            String
+  slug             String          @unique
+  description      String          @db.Text
+  category         String
+  format           EventFormat     @default(IN_PERSON)
+  status           EventStatus     @default(DRAFT)
+
+  startDate        DateTime
+  endDate          DateTime
+  timezone         String          @default("UTC+1")
+  isVirtual        Boolean         @default(false)
+  virtualStreamUrl String?
+
+  // Location Details
+  venueName        String?
+  address          String?
+  city             String?
+  country          String?
+  roomOrZone       String?
+
+  coverImageUrl    String?
+  capacity         Int
+  currency         String          @default("USD")
+
+  // Sub-entity Relations
+  ticketTiers      TicketTier[]
+  promoCodes       PromoCode[]
+  attendees        Attendee[]
+  orders           Order[]
+  communications   GuestCommunication[]
+  tableZones       TableZone[]
+  venueBookings    VenueBooking[]
+  invoices         AgencyInvoice[]
+  staffShifts      GateStaffShift[]
+  schedules        EventScheduleSession[]
+
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([organizerId])
+  @@index([status])
+  @@index([startDate])
+}
+
+model EventScheduleSession {
+  id          String   @id @default(uuid())
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  title       String
+  description String?  @db.Text
+  speakerName String?
+  stageOrRoom String?
+  startTime   DateTime
+  endTime     DateTime
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([eventId])
+}
+
+// -----------------------------------------------------------------------------
+// 5. TICKETING, PRICING & PROMO CODES
+// -----------------------------------------------------------------------------
+
+model TicketTier {
+  id             String         @id @default(uuid())
+  eventId        String
+  event          Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name           String
+  type           TicketTierType @default(GENERAL)
+  price          Float          @default(0.0)
+  currency       String         @default("USD")
+  capacity       Int
+  soldCount      Int            @default(0)
+  description    String?        @db.Text
+  perks          String[]       // Perks list
+  salesStartDate DateTime?
+  salesEndDate   DateTime?
+  isTransferable Boolean        @default(true)
+  isActive       Boolean        @default(true)
+
+  orderItems     OrderItem[]
+  attendees      Attendee[]
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([eventId])
+}
+
+model PromoCode {
+  id            String   @id @default(uuid())
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  code          String
+  discountType  String   // "percentage" or "fixed"
+  discountValue Float
+  maxUses       Int?
+  usedCount     Int      @default(0)
+  expiresAt     DateTime?
+  isActive      Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([eventId, code])
+}
+
+// -----------------------------------------------------------------------------
+// 6. ORDER, PAYMENTS & PAYOUTS
+// -----------------------------------------------------------------------------
+
+model Order {
+  id             String         @id @default(uuid())
+  orderNumber    String         @unique
+  eventId        String
+  event          Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  buyerId        String?
+  buyer          User?          @relation("BuyerOrders", fields: [buyerId], references: [id], onDelete: SetNull)
+  buyerName      String
+  buyerEmail     String
+  buyerPhone     String?
+
+  totalAmount    Float
+  platformFee    Float          @default(0.0)
+  netAmount      Float
+  currency       String         @default("USD")
+
+  status         OrderStatus    @default(PENDING)
+  paymentGateway PaymentGateway @default(STRIPE)
+  transactionRef String?        @unique
+  paidAt         DateTime?
+
+  items          OrderItem[]
+  attendees      Attendee[]
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([eventId])
+  @@index([buyerEmail])
+}
+
+model OrderItem {
+  id           String     @id @default(uuid())
+  orderId      String
+  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketTierId String
+  ticketTier   TicketTier @relation(fields: [ticketTierId], references: [id], onDelete: Cascade)
+  quantity     Int        @default(1)
+  unitPrice    Float
+  subtotal     Float
+
+  createdAt    DateTime   @default(now())
+}
+
+model Payout {
+  id             String       @id @default(uuid())
+  organizerId    String
+  amount         Float
+  currency       String       @default("USD")
+  platformFee    Float        @default(0.0)
+  status         PayoutStatus @default(PENDING)
+  bankName       String
+  accountNumber  String
+  accountName    String
+  payoutRef      String?      @unique
+  processedAt    DateTime?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizerId])
+}
+
+// -----------------------------------------------------------------------------
+// 7. ATTENDEES, QR SCANNING & GATE CHECK-IN
+// -----------------------------------------------------------------------------
+
+model Attendee {
+  id             String           @id @default(uuid())
+  eventId        String
+  event          Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ticketTierId   String
+  ticketTier     TicketTier       @relation(fields: [ticketTierId], references: [id], onDelete: Cascade)
+  orderId        String?
+  order          Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?            @relation("UserAttendances", fields: [userId], references: [id], onDelete: SetNull)
+
+  fullName       String
+  email          String
+  phone          String?
+  qrCode         String           @unique // Cryptographic hash
+  status         AttendeeStatus   @default(ATTENDING)
+  checkInTime    DateTime?
+  checkedInBy    String?          // Gate staff identifier
+  notes          String?
+
+  tableSeat      TableAssignment?
+  scanLogs       GateScanLog[]
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([eventId])
+  @@index([email])
+  @@index([qrCode])
+  @@index([status])
+}
+
+model GateStaffProfile {
+  id          String           @id @default(uuid())
+  userId      String           @unique
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gateCode    String           @default("GATE-1")
+  deviceId    String?
+
+  shifts      GateStaffShift[]
+  scans       GateScanLog[]
+
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model GateStaffShift {
+  id          String           @id @default(uuid())
+  staffId     String
+  staff       GateStaffProfile @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  eventId     String
+  event       Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  gateNumber  String           @default("A-1")
+  shiftStart  DateTime
+  shiftEnd    DateTime?
+  isActive    Boolean          @default(true)
+
+  createdAt   DateTime         @default(now())
+
+  @@index([staffId])
+  @@index([eventId])
+}
+
+model GateScanLog {
+  id             String           @id @default(uuid())
+  attendeeId     String
+  attendee       Attendee         @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+  staffId        String?
+  staff          GateStaffProfile? @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  scannedAt      DateTime         @default(now())
+  scanResult     String           // "VALID", "DUPLICATE", "INVALID"
+  gateTurnstile  String           @default("A-1")
+
+  @@index([attendeeId])
+  @@index([scannedAt])
+}
+
+// -----------------------------------------------------------------------------
+// 8. COMMUNICATIONS & BROADCASTS DOMAIN
+// -----------------------------------------------------------------------------
+
+model GuestCommunication {
+  id              String               @id @default(uuid())
+  eventId         String
+  event           Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  channel         CommunicationChannel @default(EMAIL)
+  targetAudience  String               @default("all") // all, vip, unchecked_in
+  subject         String
+  content         String               @db.Text
+  status          CampaignStatus       @default(DRAFT)
+  scheduledAt     DateTime?
+  sentAt          DateTime?
+
+  recipientsCount Int                  @default(0)
+  deliveredCount  Int                  @default(0)
+  openedCount     Int                  @default(0)
+  clickedCount    Int                  @default(0)
+
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([eventId])
+}
+
+// -----------------------------------------------------------------------------
+// 9. PLATFORM GOVERNANCE, AUDIT & NOTIFICATIONS
+// -----------------------------------------------------------------------------
+
+model PlatformAuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  user        User?    @relation("UserAuditLogs", fields: [userId], references: [id], onDelete: SetNull)
+  actorName   String
+  actorRole   String
+  action      String
+  targetEntity String
+  ipAddress   String
+  status      String   @default("success") // success, flagged, blocked
+  metadata    Json?
+
+  timestamp   DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([status])
+}
+
+model NotificationMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  linkUrl   String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PlatformSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}

@@ -1,0 +1,90 @@
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { PrismaClient, UserRole } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(PrismaService.name);
+
+  async onModuleInit() {
+    try {
+      await this.$connect();
+      this.logger.log('Connected to PostgreSQL database successfully.');
+      await this.seedInitialUsers();
+    } catch (err: any) {
+      this.logger.error(`Database connection issue: ${err.message}`);
+    }
+  }
+
+  async onModuleDestroy() {
+    try {
+      await this.$disconnect();
+    } catch {}
+  }
+
+  private async seedInitialUsers() {
+    try {
+      const adminExists = await this.user.findUnique({
+        where: { email: 'admin@innosight.com' },
+      });
+
+      if (!adminExists) {
+        this.logger.log('Seeding initial demo ecosystem accounts...');
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash('SecurePassword123!', salt);
+
+        const demoUsers = [
+          {
+            email: 'admin@innosight.com',
+            fullName: 'Super Administrator',
+            role: UserRole.SUPER_ADMIN,
+          },
+          {
+            email: 'organizer@innosight.com',
+            fullName: 'Omolara Eniola',
+            role: UserRole.ORGANIZER_INDIVIDUAL,
+          },
+          {
+            email: 'agency@innosight.com',
+            fullName: 'Zenith Agency Director',
+            role: UserRole.ORGANIZER_AGENCY,
+          },
+          {
+            email: 'venue@innosight.com',
+            fullName: 'Eko Grand Venue Manager',
+            role: UserRole.ORGANIZER_VENUE,
+          },
+          {
+            email: 'gate@innosight.com',
+            fullName: 'Gate Staff Lead',
+            role: UserRole.GATE_STAFF,
+          },
+          {
+            email: 'guest@innosight.com',
+            fullName: 'Demo Attendee Guest',
+            role: UserRole.GUEST,
+          },
+        ];
+
+        for (const u of demoUsers) {
+          await this.user.upsert({
+            where: { email: u.email },
+            update: {},
+            create: {
+              email: u.email,
+              passwordHash,
+              fullName: u.fullName,
+              role: u.role,
+              profile: {
+                create: {},
+              },
+            },
+          });
+        }
+        this.logger.log('Initial demo accounts seeded successfully for all 6 roles.');
+      }
+    } catch (err: any) {
+      this.logger.warn(`Auto-seeding skipped: ${err.message}`);
+    }
+  }
+}

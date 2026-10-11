@@ -2,9 +2,23 @@ import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/commo
 import { PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
+const FALLBACK_DATABASE_URL =
+  process.env.DATABASE_URL ||
+  'postgresql://omo_database_user:14fhFsgToH05ZqcpqcKpIehCpEIsdLRD@dpg-db2u18vavr4c7393qjo0-a.ohio-postgres.render.com/omo_database?sslmode=require';
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
+
+  constructor() {
+    super({
+      datasources: {
+        db: {
+          url: process.env.DATABASE_URL || FALLBACK_DATABASE_URL,
+        },
+      },
+    });
+  }
 
   async onModuleInit() {
     try {

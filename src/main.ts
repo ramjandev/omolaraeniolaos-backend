@@ -40,51 +40,13 @@ async function bootstrap() {
     .setDescription(
       `
 ### Enterprise NestJS Event Management Platform
-Architecture for all 6 ecosystem roles.
-
-📄 **Official Credentials Document:** [Google Docs Reference](https://docs.google.com/document/d/1RhHT8c7qz3l7zh96C8yNxbmgeH9aD1DpCPYUfzcpy5E/edit?tab=t.0)
-
----
-
-### 1. Demo Account Credentials
-The following demo accounts are available for testing the different user roles within the McEniesVite Event Management Platform:
-
-* **Account 1: Super Administrator**
-  * **User Role:** \`SUPER_ADMIN\`
-  * **Email:** [admin@mceniesvite.com](mailto:admin@mceniesvite.com)
-  * **Password:** \`Password123!\`
-
-* **Account 2: Individual Organizer**
-  * **User Role:** \`ORGANIZER_INDIVIDUAL\`
-  * **Email:** [individual@mceniesvite.com](mailto:individual@mceniesvite.com)
-  * **Password:** \`Password123!\`
-
-* **Account 3: Agency Organizer**
-  * **User Role:** \`ORGANIZER_AGENCY\`
-  * **Email:** [agency@mceniesvite.com](mailto:agency@mceniesvite.com)
-  * **Password:** \`Password123!\`
-
-* **Account 4: Venue Organizer**
-  * **User Role:** \`ORGANIZER_VENUE\`
-  * **Email:** [venue@mceniesvite.com](mailto:venue@mceniesvite.com)
-  * **Password:** \`Password123!\`
-
-* **Account 5: Gate Staff**
-  * **User Role:** \`GATE_STAFF\`
-  * **Email:** [gatestaff@mceniesvite.com](mailto:gatestaff@mceniesvite.com)
-  * **Password:** \`Password123!\`
-
-* **Account 6: Guest / Attendee**
-  * **User Role:** \`GUEST\`
-  * **Email:** [guest@mceniesvite.com](mailto:guest@mceniesvite.com)
-  * **Password:** \`Password123!\`
-
-* **Additional Login Option — Individual Organizer**
-  * **Email:** [organizer@mceniesvite.com](mailto:organizer@mceniesvite.com)
-  * **Password:** \`Password123!\`
-  * **User Role:** \`ORGANIZER_INDIVIDUAL\`
-
-> **Note:** All accounts use the same demo password (\`Password123!\`) and are intended for authorized client demonstrations and testing only.
+Architecture for all 6 ecosystem roles:
+- **Organizer (Individual)**: Multi-step registration, events catalog, ticket tier pricing, attendee management, and broadcasts.
+- **Organizer (Agency)**: Workspace setup, corporate retainer accounts, production crew assignments, and B2B billing.
+- **Organizer (Venue)**: Hospitality profile, spaces leasing, bookings calendar, and banquet table layouts.
+- **Gate Staff**: High-concurrency QR scanner validation and shift logs.
+- **Guest**: Attendee passes, session schedules, and profile.
+- **Super Admin**: Ecosystem telemetry matching Figma dashboard (142 Organizers, 847 Events, ₦4.2M Revenue).
       `,
     )
     .setVersion('1.0.0')

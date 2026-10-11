@@ -11,6 +11,7 @@ import { GateModule } from './modules/gate/gate.module';
 import { AgencyModule } from './modules/agency/agency.module';
 import { VenueModule } from './modules/venue/venue.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { VoiceRsvpModule } from './modules/voice-rsvp/voice-rsvp.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AdminModule } from './modules/admin/admin.module';
     AgencyModule,
     VenueModule,
     AdminModule,
+    VoiceRsvpModule,
   ],
 })
 export class AppModule {}

@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, Inject } from '@nestjs/common';
-import { UserRole, EventStatus } from '@prisma/client';
+import { UserRole, EventStatus, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePlanDto, OrganizerType, BillingCycle } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
+import { FilterOrganizersDto, FilterOrganizerType, FilterOrganizerStatus } from './dto/filter-organizers.dto';
 
 export interface PlanItem {
   id: string;
@@ -395,25 +396,205 @@ export class AdminService {
     };
   }
 
-  async getOrganizers() {
-    return this.prisma.user.findMany({
-      where: {
-        role: {
-          in: [
-            UserRole.ORGANIZER_INDIVIDUAL,
-            UserRole.ORGANIZER_AGENCY,
-            UserRole.ORGANIZER_VENUE,
-          ],
+  async getOrganizers(filter?: FilterOrganizersDto) {
+    const pageNum = Math.max(1, Number(filter?.page) || 1);
+    const limitNum = Math.max(1, Number(filter?.limit) || 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Base condition: only organizers (Individual, Agency, Venue)
+    const baseRoles = [
+      UserRole.ORGANIZER_INDIVIDUAL,
+      UserRole.ORGANIZER_AGENCY,
+      UserRole.ORGANIZER_VENUE,
+    ];
+
+    const whereClause: any = {
+      role: { in: baseRoles },
+    };
+
+    // Filter by Type
+    if (filter?.type && filter.type !== FilterOrganizerType.ALL) {
+      if (filter.type === FilterOrganizerType.INDIVIDUAL) {
+        whereClause.role = UserRole.ORGANIZER_INDIVIDUAL;
+      } else if (filter.type === FilterOrganizerType.AGENCY) {
+        whereClause.role = UserRole.ORGANIZER_AGENCY;
+      } else if (filter.type === FilterOrganizerType.VENUE) {
+        whereClause.role = UserRole.ORGANIZER_VENUE;
+      }
+    }
+
+    // Filter by Status
+    if (filter?.status && filter.status !== FilterOrganizerStatus.ALL) {
+      const statusUpper = filter.status.toUpperCase();
+      if (statusUpper in UserStatus) {
+        whereClause.status = statusUpper as UserStatus;
+      }
+    }
+
+    // Keyword Search across Name, Email, Agency Name, Venue Property Name
+    if (filter?.search && filter.search.trim()) {
+      const q = filter.search.trim();
+      whereClause.OR = [
+        { fullName: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { agencyProfile: { agencyName: { contains: q, mode: 'insensitive' } } },
+        { venueProfile: { propertyName: { contains: q, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [
+      users,
+      totalCount,
+      allOrganizersCount,
+      individualCount,
+      agencyCount,
+      venueCount,
+    ] = await Promise.all([
+      this.prisma.user.findMany({
+        where: whereClause,
+        skip,
+        take: limitNum,
+        include: {
+          profile: true,
+          agencyProfile: true,
+          venueProfile: true,
+          eventsCreated: { select: { id: true, title: true, status: true } },
+          _count: {
+            select: { eventsCreated: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.user.count({ where: whereClause }),
+      this.prisma.user.count({ where: { role: { in: baseRoles } } }),
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_INDIVIDUAL } }),
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_AGENCY } }),
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_VENUE } }),
+    ]);
+
+    const formattedOrganizers = users.map((user) => {
+      let displayName = user.fullName;
+      let organizerType: 'Individual' | 'Agency' | 'Venue' = 'Individual';
+      let planName = 'Essential Event Pass';
+
+      if (user.role === UserRole.ORGANIZER_AGENCY) {
+        organizerType = 'Agency';
+        displayName = user.agencyProfile?.agencyName || user.fullName;
+        planName = 'Pro Subscription';
+      } else if (user.role === UserRole.ORGANIZER_VENUE) {
+        organizerType = 'Venue';
+        displayName = user.venueProfile?.propertyName || user.fullName;
+        planName = 'Venue Subscription';
+      }
+
+      return {
+        id: user.id,
+        name: displayName,
+        contactEmail: user.email,
+        phone: user.phone,
+        type: organizerType,
+        status: user.status === UserStatus.ACTIVE ? 'Active' : user.status === UserStatus.SUSPENDED ? 'Suspended' : 'Pending',
+        rawStatus: user.status,
+        eventsCount: user._count.eventsCreated,
+        plan: planName,
+        joinedAt: user.createdAt,
+        events: user.eventsCreated,
+      };
+    });
+
+    return {
+      data: formattedOrganizers,
+      meta: {
+        total: totalCount,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(totalCount / limitNum),
+        tabCounts: {
+          all: allOrganizersCount,
+          individual: individualCount,
+          agency: agencyCount,
+          venue: venueCount,
         },
       },
+    };
+  }
+
+  /**
+   * Retrieve Single Organization / Organizer by UUID with all relations
+   */
+  async getOrganizerById(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
       include: {
         profile: true,
-        agencyProfile: true,
-        venueProfile: true,
-        eventsCreated: { select: { id: true, title: true, status: true } },
+        agencyProfile: {
+          include: {
+            clients: true,
+            teamMembers: true,
+          },
+        },
+        venueProfile: {
+          include: {
+            spaces: true,
+            bookings: true,
+          },
+        },
+        eventsCreated: {
+          orderBy: { startDate: 'desc' },
+          include: {
+            _count: {
+              select: {
+                attendees: true,
+                orders: true,
+              },
+            },
+          },
+        },
+        _count: {
+          select: {
+            eventsCreated: true,
+            teamMembers: true,
+          },
+        },
       },
-      orderBy: { createdAt: 'desc' },
     });
+
+    if (!user) {
+      throw new NotFoundException(`Organization with ID ${id} not found`);
+    }
+
+    let displayName = user.fullName;
+    let organizerType: 'Individual' | 'Agency' | 'Venue' = 'Individual';
+    let planName = 'Essential Event Pass';
+
+    if (user.role === UserRole.ORGANIZER_AGENCY) {
+      organizerType = 'Agency';
+      displayName = user.agencyProfile?.agencyName || user.fullName;
+      planName = 'Pro Subscription';
+    } else if (user.role === UserRole.ORGANIZER_VENUE) {
+      organizerType = 'Venue';
+      displayName = user.venueProfile?.propertyName || user.fullName;
+      planName = 'Venue Subscription';
+    }
+
+    return {
+      id: user.id,
+      name: displayName,
+      contactEmail: user.email,
+      phone: user.phone,
+      avatarUrl: user.avatarUrl,
+      type: organizerType,
+      role: user.role,
+      status: user.status === UserStatus.ACTIVE ? 'Active' : user.status === UserStatus.SUSPENDED ? 'Suspended' : 'Pending',
+      rawStatus: user.status,
+      plan: planName,
+      joinedAt: user.createdAt,
+      profile: user.profile,
+      agencyProfile: user.agencyProfile,
+      venueProfile: user.venueProfile,
+      eventsCount: user._count.eventsCreated,
+      events: user.eventsCreated,
+    };
   }
 
   async getAuditLogs() {

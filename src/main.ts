@@ -36,7 +36,7 @@ async function bootstrap() {
 
   // OpenAPI / Swagger Documentation
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Innosight Event Management OS API')
+    .setTitle('McEniesVite Event Management OS API')
     .setDescription(
       `
 ### Enterprise NestJS Event Management Platform
@@ -55,7 +55,7 @@ Architecture for all 6 ecosystem roles:
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document, {
-    customSiteTitle: 'Innosight API Documentation',
+    customSiteTitle: 'McEniesVite API Documentation',
     swaggerOptions: {
       persistAuthorization: true,
       docExpansion: 'list',
@@ -70,7 +70,7 @@ Architecture for all 6 ecosystem roles:
   await app.listen(PORT, '0.0.0.0');
 
   console.log(`=================================================`);
-  console.log(`🚀 NestJS Innosight Platform Backend Running`);
+  console.log(`🚀 NestJS McEniesVite Platform Backend Running`);
   console.log(`📡 Base URL: http://localhost:${PORT}/api`);
   console.log(`📖 Swagger API Documentation: http://localhost:${PORT}/api/docs`);
   console.log(`=================================================`);

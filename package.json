@@ -1,8 +1,8 @@
 {
   "name": "omolaraeniolaos-backend",
   "version": "1.0.0",
-  "description": "Enterprise NestJS Backend for Innosight Multi-Role Event Management OS",
-  "author": "Innosight Engineering",
+  "description": "Enterprise NestJS Backend for McEniesVite Multi-Role Event Management OS",
+  "author": "McEniesVite Engineering",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {

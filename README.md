@@ -1,6 +1,6 @@
-# Innosight Backend Architecture & Data Models
+# McEniesVite Backend Architecture & Data Models
 
-Production-grade database models and architecture for the Multi-Role Event Management Platform (**Innosight / McEniesVite**).
+Production-grade database models and architecture for the Multi-Role Event Management Platform (**McEniesVite**).
 
 ---
 

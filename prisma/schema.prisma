@@ -1,5 +1,5 @@
 // =============================================================================
-// Prisma Schema: Multi-Role Event Management Platform (Innosight / McEniesVite)
+// Prisma Schema: Multi-Role Event Management Platform (McEniesVite)
 // Covers: Organizer (Individual, Agency, Venue), Admin, Gate Staff, and Guests
 // =============================================================================
 

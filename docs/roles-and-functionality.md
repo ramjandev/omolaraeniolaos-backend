@@ -1,7 +1,7 @@
-# Innosight Event OS — Complete Multi-Role Functionality Specification
+# McEniesVite Event OS — Complete Multi-Role Functionality Specification
 
 > **Source Reference**: Figma Design System & Architecture  
-> **Figma File**: `omolaraeniolaos || Innosight || #FO6311B33F7C8` (Node ID: `636-19287` / Canvas: Admin Panel, Individual, Agency, Venue, Gate Staff, Guest)  
+> **Figma File**: `omolaraeniolaos || McEniesVite || #FO6311B33F7C8` (Node ID: `636-19287` / Canvas: Admin Panel, Individual, Agency, Venue, Gate Staff, Guest)  
 > **Backend Enum**: `UserRole` in Prisma Schema
 
 ---
@@ -33,7 +33,7 @@ enum UserRole {
 ## 1. Role: `SUPER_ADMIN` (Platform Governance)
 
 ### Overview
-The centralized command center for Innosight platform operators to oversee all organizers, events, transactions, and platform health. Designed on Figma Canvas `Admin Panel` (`636:19287`).
+The centralized command center for McEniesVite platform operators to oversee all organizers, events, transactions, and platform health. Designed on Figma Canvas `Admin Panel` (`636:19287`).
 
 ### Core Features & Functionalities
 

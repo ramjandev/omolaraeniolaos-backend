@@ -25,7 +25,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   private async seedInitialUsers() {
     try {
       const adminExists = await this.user.findUnique({
-        where: { email: 'admin@innosight.com' },
+        where: { email: 'admin@mceniesvite.com' },
       });
 
       if (!adminExists) {
@@ -35,32 +35,32 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
         const demoUsers = [
           {
-            email: 'admin@innosight.com',
+            email: 'admin@mceniesvite.com',
             fullName: 'Super Administrator',
             role: UserRole.SUPER_ADMIN,
           },
           {
-            email: 'organizer@innosight.com',
+            email: 'organizer@mceniesvite.com',
             fullName: 'Omolara Eniola',
             role: UserRole.ORGANIZER_INDIVIDUAL,
           },
           {
-            email: 'agency@innosight.com',
+            email: 'agency@mceniesvite.com',
             fullName: 'Zenith Agency Director',
             role: UserRole.ORGANIZER_AGENCY,
           },
           {
-            email: 'venue@innosight.com',
+            email: 'venue@mceniesvite.com',
             fullName: 'Eko Grand Venue Manager',
             role: UserRole.ORGANIZER_VENUE,
           },
           {
-            email: 'gate@innosight.com',
+            email: 'gate@mceniesvite.com',
             fullName: 'Gate Staff Lead',
             role: UserRole.GATE_STAFF,
           },
           {
-            email: 'guest@innosight.com',
+            email: 'guest@mceniesvite.com',
             fullName: 'Demo Attendee Guest',
             role: UserRole.GUEST,
           },

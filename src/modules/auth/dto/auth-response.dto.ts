@@ -5,7 +5,7 @@ export class AuthUserDto {
   @ApiProperty({ example: 'b94e77cb-8c65-4f32-8419-724578b776be', type: String })
   id: string;
 
-  @ApiProperty({ example: 'organizer@innosight.com', type: String })
+  @ApiProperty({ example: 'organizer@mceniesvite.com', type: String })
   email: string;
 
   @ApiProperty({ example: 'Omolara Eniola', type: String })

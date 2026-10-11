@@ -7,10 +7,10 @@ async function main() {
 
   // 1. Create Super Admin User
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@innosight.com' },
+    where: { email: 'admin@mceniesvite.com' },
     update: {},
     create: {
-      email: 'admin@innosight.com',
+      email: 'admin@mceniesvite.com',
       passwordHash: '$2a$10$wN1rF2c0wE4bKkP.seedhash',
       fullName: 'Super Admin Operator',
       role: UserRole.SUPER_ADMIN,

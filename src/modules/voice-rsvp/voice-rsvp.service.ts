@@ -202,7 +202,7 @@ export class VoiceRsvpService {
       });
 
       if (attendee) {
-        let mappedStatus: AttendeeStatus = AttendeeStatus.CONFIRMED;
+        let mappedStatus: AttendeeStatus = AttendeeStatus.ATTENDING;
         if (intent.status === 'DECLINED') {
           mappedStatus = AttendeeStatus.CANCELLED;
         }

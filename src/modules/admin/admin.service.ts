@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, Inject } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { UserRole, EventStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePlanDto, OrganizerType, BillingCycle } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -16,20 +16,8 @@ export interface PlanItem {
   updatedAt?: string;
 }
 
-export interface DashboardEventItem {
-  id: string;
-  name: string;
-  organizer: string;
-  organizerType: 'Agency' | 'Venue' | 'Individual';
-  status: 'Active';
-  date: string;
-  guests: number;
-  eventType: 'Gala' | 'Wedding' | 'Conference' | 'Social' | 'Exhibition';
-}
-
 @Injectable()
 export class AdminService {
-  // In-memory / cache store for custom plans layered on top of platform presets
   private plansStore: PlanItem[] = [
     {
       id: 'plan_ind_1',
@@ -97,227 +85,254 @@ export class AdminService {
     },
   ];
 
-  // Mock Active Events for Dashboard Table matching Figma design
-  private activeEventsList: DashboardEventItem[] = [
-    {
-      id: 'evt_1',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Premium Events Ng',
-      organizerType: 'Agency',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 150,
-      eventType: 'Gala',
-    },
-    {
-      id: 'evt_2',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Royale Occasions',
-      organizerType: 'Agency',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 110,
-      eventType: 'Wedding',
-    },
-    {
-      id: 'evt_3',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Eko Convention Centre',
-      organizerType: 'Venue',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 120,
-      eventType: 'Gala',
-    },
-    {
-      id: 'evt_4',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'James Obi',
-      organizerType: 'Individual',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 90,
-      eventType: 'Conference',
-    },
-    {
-      id: 'evt_5',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Premium Events Ng',
-      organizerType: 'Agency',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 190,
-      eventType: 'Social',
-    },
-    {
-      id: 'evt_6',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Premium Events Ng',
-      organizerType: 'Agency',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 250,
-      eventType: 'Conference',
-    },
-    {
-      id: 'evt_7',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Premium Events Ng',
-      organizerType: 'Agency',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 240,
-      eventType: 'Gala',
-    },
-    {
-      id: 'evt_8',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Premium Events Ng',
-      organizerType: 'Agency',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 50,
-      eventType: 'Exhibition',
-    },
-    {
-      id: 'evt_9',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Premium Events Ng',
-      organizerType: 'Agency',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 200,
-      eventType: 'Wedding',
-    },
-    {
-      id: 'evt_10',
-      name: 'The Grand Royal Gala & Investiture',
-      organizer: 'Premium Events Ng',
-      organizerType: 'Agency',
-      status: 'Active',
-      date: '15 Jan 2026',
-      guests: 230,
-      eventType: 'Social',
-    },
-  ];
-
   constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
   /**
-   * 1. Dashboard Tab: 4 Top KPI Cards
+   * 1. Dashboard Tab: 4 Top KPI Cards (Pure Numerical & Relational Data from DB)
    */
   async getDashboardSummary() {
-    const [totalUsers, activeEventsCount, completedEventsCount] = await Promise.all([
-      this.prisma.user.count(),
-      this.prisma.event.count({ where: { status: { in: ['LIVE', 'PUBLISHED'] } } }),
-      this.prisma.event.count({ where: { status: 'COMPLETED' } }),
+    const [
+      individualCount,
+      agencyCount,
+      venueCount,
+      activeEventsCount,
+      completedEventsCount,
+      ordersAgg,
+    ] = await Promise.all([
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_INDIVIDUAL } }),
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_AGENCY } }),
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_VENUE } }),
+      this.prisma.event.count({
+        where: { status: { in: [EventStatus.LIVE, EventStatus.PUBLISHED] } },
+      }),
+      this.prisma.event.count({ where: { status: EventStatus.COMPLETED } }),
+      this.prisma.order.aggregate({
+        _sum: { totalAmount: true },
+        where: { status: 'PAID' },
+      }),
     ]);
 
+    const totalOrganizers = individualCount + agencyCount + venueCount;
+    const totalRevenueAmount = ordersAgg._sum.totalAmount || 0;
+
     return {
-      totalOrganizers: {
-        value: totalUsers > 0 ? totalUsers : 142,
-        subtitle: '98 Individual · 31 Agency · 13 Venue',
+      totalOrganizers,
+      breakdown: {
+        individual: individualCount,
+        agency: agencyCount,
+        venue: venueCount,
       },
-      activeEvents: {
-        value: activeEventsCount > 0 ? activeEventsCount : 847,
-        subtitle: 'Currently live or upcoming',
-      },
-      completedEvents: {
-        value: completedEventsCount > 0 ? completedEventsCount : 2341,
-        subtitle: 'Lifetime platform total',
-      },
-      platformRevenue: {
-        value: '₦4.2M',
-        subtitle: 'September 2026',
-      },
+      activeEvents: activeEventsCount,
+      completedEvents: completedEventsCount,
+      totalRevenue: totalRevenueAmount,
     };
   }
 
   /**
-   * 2. Dashboard Tab: Organizer Breakdown (Doughnut Chart)
+   * 2. Dashboard Tab: Organizer Breakdown (Pure Numerical Data for Charts)
    */
   async getOrganizerBreakdown() {
-    return {
-      title: 'Organizer Breakdown',
-      subtitle: 'Distribution by organizer type',
-      items: [
-        { type: 'Individual', count: 98, percentage: 69 },
-        { type: 'Agency', count: 31, percentage: 22 },
-        { type: 'Venue', count: 13, percentage: 9 },
-      ],
-      totalOrganizers: 142,
-    };
-  }
+    const [individualCount, agencyCount, venueCount] = await Promise.all([
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_INDIVIDUAL } }),
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_AGENCY } }),
+      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_VENUE } }),
+    ]);
 
-  /**
-   * 3. Dashboard Tab: Revenue by Organizer Type Table
-   */
-  async getRevenueByOrganizerType() {
+    const total = individualCount + agencyCount + venueCount;
+
     return {
-      period: 'September 2026',
-      subtitle: 'full breakdown on Revenue & Plans',
-      rows: [
+      totalOrganizers: total,
+      items: [
         {
           type: 'Individual',
-          organizers: 94,
-          revenue: '₦2.1M',
-          billingModel: 'Per-event',
-          mom: '+12%',
+          count: individualCount,
+          percentage: total > 0 ? Math.round((individualCount / total) * 100) : 0,
         },
         {
           type: 'Agency',
-          organizers: 31,
-          revenue: '₦1.6M',
-          billingModel: 'Subscription',
-          mom: '+12%',
+          count: agencyCount,
+          percentage: total > 0 ? Math.round((agencyCount / total) * 100) : 0,
         },
         {
           type: 'Venue',
-          organizers: 13,
-          revenue: '₦0.5M',
-          billingModel: 'Subscription',
-          mom: '+12%',
+          count: venueCount,
+          percentage: total > 0 ? Math.round((venueCount / total) * 100) : 0,
         },
       ],
-      totals: {
-        totalOrganizer: 138,
-        totalRevenue: '₦4.2M',
-      },
     };
   }
 
   /**
-   * 4. Dashboard Tab: Active Events Table with Pagination
+   * 3. Dashboard Tab: Revenue by Organizer Type (Pure Aggregated DB Data)
    */
-  async getDashboardActiveEvents(page: number = 1, limit: number = 10, search?: string) {
-    let filtered = [...this.activeEventsList];
-    if (search && search.trim()) {
-      const q = search.toLowerCase();
-      filtered = filtered.filter(
-        (e) =>
-          e.name.toLowerCase().includes(q) ||
-          e.organizer.toLowerCase().includes(q) ||
-          e.eventType.toLowerCase().includes(q),
-      );
-    }
+  async getRevenueByOrganizerType() {
+    const [individualUsers, agencyUsers, venueUsers] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { role: UserRole.ORGANIZER_INDIVIDUAL },
+        select: {
+          id: true,
+          eventsCreated: {
+            select: {
+              orders: {
+                where: { status: 'PAID' },
+                select: { totalAmount: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.user.findMany({
+        where: { role: UserRole.ORGANIZER_AGENCY },
+        select: {
+          id: true,
+          eventsCreated: {
+            select: {
+              orders: {
+                where: { status: 'PAID' },
+                select: { totalAmount: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.user.findMany({
+        where: { role: UserRole.ORGANIZER_VENUE },
+        select: {
+          id: true,
+          eventsCreated: {
+            select: {
+              orders: {
+                where: { status: 'PAID' },
+                select: { totalAmount: true },
+              },
+            },
+          },
+        },
+      }),
+    ]);
 
-    const startIndex = (page - 1) * limit;
-    const paginated = filtered.slice(startIndex, startIndex + limit);
+    const calculateSum = (users: typeof individualUsers) =>
+      users.reduce((acc, u) => {
+        const userTotal = u.eventsCreated.reduce((evAcc, ev) => {
+          const evTotal = ev.orders.reduce((ordAcc, ord) => ordAcc + (ord.totalAmount || 0), 0);
+          return evAcc + evTotal;
+        }, 0);
+        return acc + userTotal;
+      }, 0);
+
+    const individualRevenue = calculateSum(individualUsers);
+    const agencyRevenue = calculateSum(agencyUsers);
+    const venueRevenue = calculateSum(venueUsers);
+    const totalRevenue = individualRevenue + agencyRevenue + venueRevenue;
+    const totalOrganizers = individualUsers.length + agencyUsers.length + venueUsers.length;
 
     return {
-      data: paginated,
+      totalOrganizers,
+      totalRevenue,
+      rows: [
+        {
+          type: 'Individual',
+          organizersCount: individualUsers.length,
+          revenueAmount: individualRevenue,
+          billingModel: 'Per-event',
+        },
+        {
+          type: 'Agency',
+          organizersCount: agencyUsers.length,
+          revenueAmount: agencyRevenue,
+          billingModel: 'Subscription',
+        },
+        {
+          type: 'Venue',
+          organizersCount: venueUsers.length,
+          revenueAmount: venueRevenue,
+          billingModel: 'Subscription',
+        },
+      ],
+    };
+  }
+
+  /**
+   * 4. Dashboard Tab: Active Events Table (Query directly from DB Event relation)
+   */
+  async getDashboardActiveEvents(page: number = 1, limit: number = 10, search?: string) {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Number(limit) || 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const whereClause: any = {
+      status: { in: [EventStatus.LIVE, EventStatus.PUBLISHED] },
+    };
+
+    if (search && search.trim()) {
+      whereClause.OR = [
+        { title: { contains: search.trim(), mode: 'insensitive' } },
+        { category: { contains: search.trim(), mode: 'insensitive' } },
+        { organizer: { fullName: { contains: search.trim(), mode: 'insensitive' } } },
+      ];
+    }
+
+    const [events, total] = await Promise.all([
+      this.prisma.event.findMany({
+        where: whereClause,
+        skip,
+        take: limitNum,
+        orderBy: { startDate: 'asc' },
+        include: {
+          organizer: {
+            select: {
+              id: true,
+              fullName: true,
+              role: true,
+              agencyProfile: { select: { agencyName: true } },
+              venueProfile: { select: { propertyName: true } },
+            },
+          },
+          _count: {
+            select: { attendees: true },
+          },
+        },
+      }),
+      this.prisma.event.count({ where: whereClause }),
+    ]);
+
+    const formattedEvents = events.map((ev) => {
+      let orgName = ev.organizer.fullName;
+      let orgType = 'Individual';
+
+      if (ev.organizer.role === UserRole.ORGANIZER_AGENCY) {
+        orgType = 'Agency';
+        orgName = ev.organizer.agencyProfile?.agencyName || ev.organizer.fullName;
+      } else if (ev.organizer.role === UserRole.ORGANIZER_VENUE) {
+        orgType = 'Venue';
+        orgName = ev.organizer.venueProfile?.propertyName || ev.organizer.fullName;
+      }
+
+      return {
+        id: ev.id,
+        name: ev.title,
+        organizer: orgName,
+        organizerType: orgType,
+        status: ev.status,
+        date: ev.startDate,
+        guestsCount: ev._count.attendees,
+        eventType: ev.category,
+      };
+    });
+
+    return {
+      data: formattedEvents,
       meta: {
-        total: 150, // Lifetime active events count from Figma
-        showing: filtered.length,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(150 / limit),
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
       },
     };
   }
 
   /**
-   * Consolidated Telemetry
+   * Consolidated Telemetry combining relational data
    */
   async getMetrics() {
     const [summary, breakdown, revenueTable, activeEvents] = await Promise.all([
@@ -328,24 +343,10 @@ export class AdminService {
     ]);
 
     return {
-      summary: {
-        totalOrganizers: summary.totalOrganizers.value,
-        organizersSubtitle: summary.totalOrganizers.subtitle,
-        activeEvents: summary.activeEvents.value,
-        activeEventsSubtitle: summary.activeEvents.subtitle,
-        completedEvents: summary.completedEvents.value,
-        completedEventsSubtitle: summary.completedEvents.subtitle,
-        platformRevenue: summary.platformRevenue.value,
-        platformRevenueSubtitle: summary.platformRevenue.subtitle,
-      },
-      organizerBreakdown: {
-        individual: breakdown.items[0],
-        agency: breakdown.items[1],
-        venue: breakdown.items[2],
-      },
-      revenueByOrganizerType: revenueTable.rows,
-      totals: revenueTable.totals,
-      activeEvents: activeEvents.data,
+      summary,
+      organizerBreakdown: breakdown,
+      revenueByOrganizerType: revenueTable,
+      activeEvents,
     };
   }
 
@@ -377,9 +378,6 @@ export class AdminService {
     });
   }
 
-  /**
-   * Create a plan that accepts one of the three organizer types: Individual, Agency, or Venue
-   */
   async createPlan(dto: CreatePlanDto): Promise<PlanItem> {
     const formattedPrice = typeof dto.price === 'number' 
       ? `₦${dto.price.toLocaleString()}` 

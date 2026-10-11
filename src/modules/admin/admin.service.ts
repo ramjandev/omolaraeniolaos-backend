@@ -480,6 +480,16 @@ export class AdminService {
         schedules: true,
         venueSpace: true,
         agencyClient: true,
+        attendees: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            status: true,
+            notes: true,
+            checkInTime: true,
+          },
+        },
         tableZones: {
           include: {
             assignments: true,
@@ -499,7 +509,128 @@ export class AdminService {
       throw new NotFoundException(`Event with ID ${id} not found`);
     }
 
-    return event;
+    // Dynamic calculations from database relations
+    const totalInvitees = event.attendees.length;
+
+    // Categorize RSVP statuses dynamically from attendee database relations
+    const confirmedCount = event.attendees.filter(
+      (a) => a.status === 'ATTENDING' || a.notes?.toLowerCase().includes('confirmed'),
+    ).length;
+
+    const tentativeCount = event.attendees.filter(
+      (a) => a.notes?.toLowerCase().includes('tentative') || a.notes?.toLowerCase().includes('maybe'),
+    ).length;
+
+    const declinedCount = event.attendees.filter(
+      (a) => a.status === 'CANCELLED' || a.notes?.toLowerCase().includes('decline'),
+    ).length;
+
+    const checkedInCount = event.attendees.filter(
+      (a) => a.status === 'CHECKED_IN' || a.checkInTime !== null,
+    ).length;
+
+    const noResponseCount = Math.max(
+      0,
+      totalInvitees - (confirmedCount + tentativeCount + declinedCount + checkedInCount),
+    );
+
+    // Calculate percentages
+    const confirmedPct = totalInvitees > 0 ? Math.round((confirmedCount / totalInvitees) * 100) : 0;
+    const tentativePct = totalInvitees > 0 ? Math.round((tentativeCount / totalInvitees) * 100) : 0;
+    const declinedPct = totalInvitees > 0 ? Math.round((declinedCount / totalInvitees) * 100) : 0;
+    const noResponsePct = totalInvitees > 0 ? Math.round((noResponseCount / totalInvitees) * 100) : 0;
+
+    // Countdown calculation
+    const now = new Date().getTime();
+    const target = new Date(event.startDate).getTime();
+    const diff = Math.max(0, target - now);
+    const countdown = {
+      days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+      hours: Math.floor((diff / (1000 * 60 * 60)) % 24),
+      minutes: Math.floor((diff / 1000 / 60) % 60),
+    };
+
+    // Determine organizer details
+    let organizerName = event.organizer.fullName;
+    let organizerType = 'Individual';
+    let billingPlan = 'Essential Event Pass';
+
+    if (event.organizer.role === UserRole.ORGANIZER_AGENCY) {
+      organizerType = 'Agency';
+      organizerName = event.organizer.agencyProfile?.agencyName || event.organizer.fullName;
+      billingPlan = 'Included in subscription';
+    } else if (event.organizer.role === UserRole.ORGANIZER_VENUE) {
+      organizerType = 'Venue';
+      organizerName = event.organizer.venueProfile?.propertyName || event.organizer.fullName;
+      billingPlan = 'Included in subscription';
+    }
+
+    return {
+      event: {
+        id: event.id,
+        title: event.title,
+        status: event.status, // e.g. "DRAFT", "LIVE", "PUBLISHED"
+        category: event.category, // e.g. "Gala"
+        description: event.description,
+        startDate: event.startDate,
+        endDate: event.endDate,
+        timezone: event.timezone,
+        venueName: event.venueName || event.venueSpace?.name || 'The Monarch Event Centre',
+        address: event.address,
+        capacity: event.capacity,
+        coverImageUrl: event.coverImageUrl,
+        countdown,
+      },
+      summary: {
+        totalInvitees: {
+          value: totalInvitees,
+        },
+        confirmed: {
+          value: confirmedCount,
+        },
+        checkedIn: {
+          value: checkedInCount > 0 ? checkedInCount : null,
+          formatted: checkedInCount > 0 ? String(checkedInCount) : '--',
+        },
+      },
+      rsvpStatusBreakdown: [
+        {
+          label: 'Confirmed',
+          count: confirmedCount,
+          percentage: confirmedPct,
+        },
+        {
+          label: 'Tentative',
+          count: tentativeCount,
+          percentage: tentativePct,
+        },
+        {
+          label: 'Declined',
+          count: declinedCount,
+          percentage: declinedPct,
+        },
+        {
+          label: 'No Response',
+          count: noResponseCount,
+          percentage: noResponsePct,
+        },
+      ],
+      eventDetails: {
+        organizer: organizerName,
+        organizerType,
+        eventDate: event.startDate,
+        eventType: event.category,
+        location: event.venueName || event.venueSpace?.name || 'The Monarch Event Centre',
+        billing: billingPlan,
+      },
+      relations: {
+        organizer: event.organizer,
+        ticketTiers: event.ticketTiers,
+        schedules: event.schedules,
+        tableZones: event.tableZones,
+        attendees: event.attendees,
+      },
+    };
   }
 
   /**

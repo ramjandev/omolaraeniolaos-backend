@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { UserRole } from '@prisma/client';
+import { UserRole, EventStatus, EventFormat } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
@@ -385,8 +385,13 @@ export class AuthService {
 
   /**
    * 1. Multi-Step Registration: Individual Organizer
+   * Handles Steps 1-5: User Account, Initial Event Setup, Plan Selection, and Activation/Payment
    */
   async registerIndividual(dto: RegisterOrganizerIndividualDto) {
+    if (dto.confirmPassword && dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Confirm password does not match password');
+    }
+
     const email = dto.email.toLowerCase().trim();
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -395,8 +400,55 @@ export class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
-    const plan = await this.resolvePlan(dto.planId);
+    const planId = dto.planId || 'plan_ind_1';
+    const plan = await this.resolvePlan(planId);
 
+    // Parse event date, start time, and optional end time
+    const baseDate = new Date(dto.eventDate);
+    const validBase = isNaN(baseDate.getTime()) ? new Date() : baseDate;
+
+    const parseTime = (timeStr?: string) => {
+      if (!timeStr) return null;
+      const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+      if (!match) return null;
+      let hours = parseInt(match[1], 10);
+      const minutes = parseInt(match[2], 10);
+      const meridiem = match[3]?.toUpperCase();
+      if (meridiem === 'PM' && hours < 12) hours += 12;
+      if (meridiem === 'AM' && hours === 12) hours = 0;
+      return { hours, minutes };
+    };
+
+    const startDate = new Date(validBase);
+    const startParsed = parseTime(dto.startTime);
+    if (startParsed) {
+      startDate.setHours(startParsed.hours, startParsed.minutes, 0, 0);
+    } else {
+      startDate.setHours(14, 0, 0, 0);
+    }
+
+    const endDate = new Date(validBase);
+    const endParsed = parseTime(dto.endTime);
+    if (endParsed) {
+      endDate.setHours(endParsed.hours, endParsed.minutes, 0, 0);
+      if (endDate <= startDate) {
+        endDate.setDate(endDate.getDate() + 1);
+      }
+    } else {
+      endDate.setTime(startDate.getTime() + 4 * 60 * 60 * 1000); // Default 4 hours duration
+    }
+
+    // Generate unique slug for the event
+    const cleanSlugBase = (dto.eventName || 'event')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const slug = `${cleanSlugBase || 'event'}-${Date.now().toString(36)}`;
+
+    const guestCapacity = Number(dto.expectedGuests) || 150;
+
+    // Create user and initial event atomically
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -406,22 +458,62 @@ export class AuthService {
         role: UserRole.ORGANIZER_INDIVIDUAL,
         profile: {
           create: {
-            bio: dto.bio,
-            company: dto.city,
+            bio: `Organizer of ${dto.eventName}`,
+            company: dto.venueLocation,
+          },
+        },
+        eventsCreated: {
+          create: {
+            title: dto.eventName,
+            slug,
+            description: `${dto.eventType} hosted by ${dto.fullName}`,
+            category: dto.eventType,
+            format: EventFormat.IN_PERSON,
+            status: EventStatus.PUBLISHED,
+            startDate,
+            endDate,
+            timezone: 'Africa/Lagos',
+            venueName: dto.venueLocation,
+            address: dto.venueLocation,
+            capacity: guestCapacity,
+            currency: 'NGN',
+            ticketTiers: {
+              create: [
+                {
+                  name: 'General Guest Pass',
+                  capacity: guestCapacity,
+                  price: 0,
+                  currency: 'NGN',
+                },
+              ],
+            },
           },
         },
       },
       include: {
         profile: true,
+        eventsCreated: {
+          include: {
+            ticketTiers: true,
+          },
+        },
       },
     });
 
-    const skipPayment = dto.skipPayment !== false;
+    const createdEvent = user.eventsCreated[0];
+    const isFree = plan.price === 0;
+    const isSkipped = dto.skipPayment === true;
     let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
 
-    if (!skipPayment && plan.price > 0) {
+    if (!isFree && !isSkipped) {
       checkoutResult = await this.generatePlanCheckoutUrl(user, plan);
     }
+
+    const planStatus = isFree
+      ? 'ACTIVE'
+      : isSkipped
+        ? 'PAYMENT_PENDING'
+        : 'CHECKOUT_INITIALIZED';
 
     await this.prisma.platformSetting.upsert({
       where: { key: `PLAN_USER_${user.id}` },
@@ -431,8 +523,9 @@ export class AuthService {
           planName: plan.name,
           price: plan.price,
           cycle: plan.cycle,
-          isPaid: plan.price === 0,
-          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          isPaid: isFree,
+          status: planStatus,
+          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
           selectedAt: new Date().toISOString(),
         }),
       },
@@ -443,11 +536,12 @@ export class AuthService {
           planName: plan.name,
           price: plan.price,
           cycle: plan.cycle,
-          isPaid: plan.price === 0,
-          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          isPaid: isFree,
+          status: planStatus,
+          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
           selectedAt: new Date().toISOString(),
         }),
-        description: `Plan assigned to user ${user.id}`,
+        description: `Plan assigned to individual user ${user.id}`,
       },
     });
 
@@ -462,13 +556,24 @@ export class AuthService {
         role: user.role,
         profile: user.profile,
       },
+      event: {
+        id: createdEvent.id,
+        title: createdEvent.title,
+        slug: createdEvent.slug,
+        category: createdEvent.category,
+        startDate: createdEvent.startDate,
+        endDate: createdEvent.endDate,
+        venueName: createdEvent.venueName,
+        capacity: createdEvent.capacity,
+        status: createdEvent.status,
+      },
       selectedPlan: {
         id: plan.id,
         name: plan.name,
         price: plan.price,
         cycle: plan.cycle,
-        isPaid: plan.price === 0,
-        status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+        isPaid: isFree,
+        status: planStatus,
       },
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,

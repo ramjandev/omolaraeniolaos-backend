@@ -1,7 +1,8 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePlanDto, OrganizerType, BillingCycle } from './dto/create-plan.dto';
+import { UpdatePlanDto } from './dto/update-plan.dto';
 
 export interface PlanItem {
   id: string;
@@ -12,6 +13,7 @@ export interface PlanItem {
   features: string[];
   isArchived: boolean;
   createdAt: string;
+  updatedAt?: string;
 }
 
 @Injectable()
@@ -218,5 +220,84 @@ export class AdminService {
       );
     }
     return this.plansStore;
+  }
+
+  /**
+   * Get single plan by ID
+   */
+  async getPlanById(id: string): Promise<PlanItem> {
+    const plan = this.plansStore.find((p) => p.id === id);
+    if (!plan) {
+      throw new NotFoundException(`Plan with ID ${id} not found`);
+    }
+    return plan;
+  }
+
+  /**
+   * Update / Edit existing plan
+   */
+  async updatePlan(id: string, dto: UpdatePlanDto): Promise<PlanItem> {
+    const planIndex = this.plansStore.findIndex((p) => p.id === id);
+    if (planIndex === -1) {
+      throw new NotFoundException(`Plan with ID ${id} not found`);
+    }
+
+    const existing = this.plansStore[planIndex];
+    let formattedPrice = existing.price;
+
+    if (dto.price !== undefined) {
+      formattedPrice = typeof dto.price === 'number'
+        ? `₦${dto.price.toLocaleString()}`
+        : dto.price.startsWith('₦')
+        ? dto.price
+        : `₦${dto.price}`;
+    }
+
+    const updatedPlan: PlanItem = {
+      ...existing,
+      planName: dto.planName ?? existing.planName,
+      price: formattedPrice,
+      organizerType: dto.organizerType ?? existing.organizerType,
+      billingCycle: dto.billingCycle ?? existing.billingCycle,
+      features: dto.features ?? existing.features,
+      isArchived: dto.isArchived ?? existing.isArchived,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.plansStore[planIndex] = updatedPlan;
+
+    try {
+      await this.prisma.platformSetting.upsert({
+        where: { key: `PLAN_${updatedPlan.id}` },
+        update: { value: JSON.stringify(updatedPlan) },
+        create: {
+          key: `PLAN_${updatedPlan.id}`,
+          value: JSON.stringify(updatedPlan),
+          description: `Plan updated for ${updatedPlan.organizerType}`,
+        },
+      });
+    } catch {}
+
+    return updatedPlan;
+  }
+
+  /**
+   * Delete existing plan
+   */
+  async deletePlan(id: string): Promise<{ deleted: boolean; id: string }> {
+    const planIndex = this.plansStore.findIndex((p) => p.id === id);
+    if (planIndex === -1) {
+      throw new NotFoundException(`Plan with ID ${id} not found`);
+    }
+
+    this.plansStore.splice(planIndex, 1);
+
+    try {
+      await this.prisma.platformSetting.delete({
+        where: { key: `PLAN_${id}` },
+      });
+    } catch {}
+
+    return { deleted: true, id };
   }
 }

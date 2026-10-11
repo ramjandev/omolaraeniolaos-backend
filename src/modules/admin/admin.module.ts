@@ -2,13 +2,13 @@ import { Module } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { AdminController, AdminOrganizersController } from './admin.controller';
 import { AdminDashboardController } from './admin-dashboard.controller';
-import { AdminPlansController } from './admin-plans.controller';
+import { AdminRevenuePlansController } from './admin-revenue.controller';
 
 @Module({
   controllers: [
     AdminDashboardController,
     AdminOrganizersController,
-    AdminPlansController,
+    AdminRevenuePlansController,
     AdminController,
   ],
   providers: [AdminService],

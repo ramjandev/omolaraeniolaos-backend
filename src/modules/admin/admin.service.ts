@@ -1,9 +1,89 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreatePlanDto, OrganizerType, BillingCycle } from './dto/create-plan.dto';
+
+export interface PlanItem {
+  id: string;
+  planName: string;
+  price: string;
+  organizerType: OrganizerType;
+  billingCycle: BillingCycle;
+  features: string[];
+  isArchived: boolean;
+  createdAt: string;
+}
 
 @Injectable()
 export class AdminService {
+  // In-memory / cache store for custom plans layered on top of platform presets
+  private plansStore: PlanItem[] = [
+    {
+      id: 'plan_ind_1',
+      planName: 'Essential Event Pass',
+      price: '₦00',
+      organizerType: OrganizerType.INDIVIDUAL,
+      billingCycle: BillingCycle.PER_EVENT,
+      features: [
+        'Up to 150 Guest RSVP passes',
+        'Direct WhatsApp RSVP link dispatch',
+        'Standard QR Gate Check-in Pass',
+        'Real-time attendance tracking',
+        '30-day post-event analytics',
+      ],
+      isArchived: false,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'plan_ind_2',
+      planName: 'Grand Celebration Pass',
+      price: '₦35,000',
+      organizerType: OrganizerType.INDIVIDUAL,
+      billingCycle: BillingCycle.PER_EVENT,
+      features: [
+        'Up to 600 Guest passes & VIP tagging',
+        'Automated Multilingual WhatsApp dispatch',
+        'Security gate fraud prevention alerts',
+        'Table & Seating arrangement coordinator',
+        'Zero-data-loss upgrade path to Agency',
+      ],
+      isArchived: false,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'plan_agency_1',
+      planName: 'Agency Pro Pass',
+      price: '₦120,000',
+      organizerType: OrganizerType.AGENCY,
+      billingCycle: BillingCycle.MONTHLY,
+      features: [
+        'Unlimited active events & clients',
+        'Full team role permissions (Manager, Staff)',
+        'Custom white-label WhatsApp branding',
+        'Multi-gate live sync and turnstile scanner ops',
+        'Dedicated VIP guest concierge & voice notes',
+      ],
+      isArchived: false,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'plan_venue_1',
+      planName: 'Venue Enterprise Pass',
+      price: '₦250,000',
+      organizerType: OrganizerType.VENUE,
+      billingCycle: BillingCycle.MONTHLY,
+      features: [
+        'Multi-space and hall booking calendar',
+        'Automated guest safety capacity controls',
+        'Turnstile & Gate hardware scanner integration',
+        'Real-time catering & dietary preference telemetry',
+        'Dedicated account manager & 24/7 hotline',
+      ],
+      isArchived: false,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+
   constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
   async getMetrics() {
@@ -85,5 +165,58 @@ export class AdminService {
       orderBy: { timestamp: 'desc' },
       take: 50,
     });
+  }
+
+  /**
+   * Create a plan that accepts one of the three organizer types: Individual, Agency, or Venue
+   */
+  async createPlan(dto: CreatePlanDto): Promise<PlanItem> {
+    const formattedPrice = typeof dto.price === 'number' 
+      ? `₦${dto.price.toLocaleString()}` 
+      : dto.price.startsWith('₦') 
+      ? dto.price 
+      : `₦${dto.price}`;
+
+    const newPlan: PlanItem = {
+      id: `plan_${dto.organizerType.toLowerCase()}_${Date.now()}`,
+      planName: dto.planName,
+      price: formattedPrice,
+      organizerType: dto.organizerType,
+      billingCycle: dto.billingCycle,
+      features: dto.features && dto.features.length > 0 ? dto.features : ['Core Platform Access'],
+      isArchived: dto.isArchived ?? false,
+      createdAt: new Date().toISOString(),
+    };
+
+    this.plansStore.unshift(newPlan);
+
+    // Also persist into PlatformSetting store as audit history if table exists
+    try {
+      await this.prisma.platformSetting.upsert({
+        where: { key: `PLAN_${newPlan.id}` },
+        update: { value: JSON.stringify(newPlan) },
+        create: {
+          key: `PLAN_${newPlan.id}`,
+          value: JSON.stringify(newPlan),
+          description: `Plan created for ${dto.organizerType}`,
+        },
+      });
+    } catch {
+      // Non-blocking in case DB migration is running
+    }
+
+    return newPlan;
+  }
+
+  /**
+   * Retrieve plans, optionally filtered by organizer type (Individual, Agency, Venue)
+   */
+  async getPlans(type?: OrganizerType): Promise<PlanItem[]> {
+    if (type) {
+      return this.plansStore.filter(
+        (p) => p.organizerType.toLowerCase() === type.toLowerCase() && !p.isArchived,
+      );
+    }
+    return this.plansStore;
   }
 }

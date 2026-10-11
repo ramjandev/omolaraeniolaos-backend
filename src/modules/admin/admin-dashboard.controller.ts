@@ -64,6 +64,13 @@ export class AdminDashboardController {
   @ApiOperation({
     summary: '[Admin Only] Retrieve single event details with organizer, venue/agency relations, ticket tiers, schedules, and attendance metrics',
   })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    required: true,
+    description: 'Unique Event ID (UUID)',
+    example: '1a249d44-8eed-4b88-9f7b-f323952ee599',
+  })
   @ApiResponse({ status: 200, description: 'Single event full detail returned' })
   async getEventById(@Param('id') id: string) {
     return this.adminService.getAdminEventById(id);

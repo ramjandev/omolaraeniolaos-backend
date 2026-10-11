@@ -5,9 +5,11 @@ import {
   BadRequestException,
   Inject,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
@@ -17,9 +19,45 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AuthResponseDto, TokenResponseDto } from './dto/auth-response.dto';
+import { RegisterOrganizerIndividualDto } from './dto/register-organizer-individual.dto';
+import { RegisterOrganizerAgencyDto } from './dto/register-organizer-agency.dto';
+import { RegisterOrganizerVenueDto } from './dto/register-organizer-venue.dto';
+import { PayPlanDto } from './dto/pay-plan.dto';
+
+const DEFAULT_PLANS: Record<string, { id: string; name: string; price: number; cycle: string; organizerType: string }> = {
+  plan_ind_1: {
+    id: 'plan_ind_1',
+    name: 'Essential Event Pass',
+    price: 0,
+    cycle: 'Per-event',
+    organizerType: 'Individual',
+  },
+  plan_ind_2: {
+    id: 'plan_ind_2',
+    name: 'Grand Celebration Pass',
+    price: 35000,
+    cycle: 'Per-event',
+    organizerType: 'Individual',
+  },
+  plan_agency_1: {
+    id: 'plan_agency_1',
+    name: 'Agency Pro Pass',
+    price: 120000,
+    cycle: 'Monthly',
+    organizerType: 'Agency',
+  },
+  plan_venue_1: {
+    id: 'plan_venue_1',
+    name: 'Venue Enterprise Pass',
+    price: 250000,
+    cycle: 'Monthly',
+    organizerType: 'Venue',
+  },
+};
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly accessSecret: string;
   private readonly refreshSecret: string;
   private readonly accessExpiresIn: string;
@@ -259,6 +297,445 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
+    };
+  }
+
+  async resolvePlan(planId: string) {
+    try {
+      const setting = await this.prisma.platformSetting.findUnique({
+        where: { key: `PLAN_${planId}` },
+      });
+      if (setting) {
+        const parsed = JSON.parse(setting.value);
+        return {
+          id: parsed.id,
+          name: parsed.planName,
+          price: Number(parsed.price) || 0,
+          cycle: parsed.billingCycle,
+          organizerType: parsed.organizerType,
+        };
+      }
+    } catch {}
+
+    return (
+      DEFAULT_PLANS[planId] || {
+        id: planId,
+        name: 'Standard Event Pass',
+        price: 0,
+        cycle: 'Per-event',
+        organizerType: 'Individual',
+      }
+    );
+  }
+
+  async generatePlanCheckoutUrl(
+    user: { id: string; email: string; fullName: string; phone?: string | null },
+    plan: { id: string; name: string; price: number },
+    redirectUrl?: string,
+  ) {
+    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+    if (!secretKey || plan.price <= 0) return null;
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const txRef = `SUB-${user.id.slice(0, 8)}-${Date.now()}`;
+
+    try {
+      const res = await fetch('https://api.flutterwave.com/v3/payments', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tx_ref: txRef,
+          amount: plan.price,
+          currency: 'NGN',
+          redirect_url:
+            redirectUrl || `${frontendUrl}/dashboard?payment_success=true&plan=${plan.id}`,
+          customer: {
+            email: user.email,
+            name: user.fullName,
+            phonenumber: user.phone || '',
+          },
+          customizations: {
+            title: `McEnies Vite - ${plan.name}`,
+            description: `Subscription/Pass payment for ${plan.name}`,
+          },
+          meta: {
+            userId: user.id,
+            planId: plan.id,
+            type: 'ORGANIZER_PLAN_SUBSCRIPTION',
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.status === 'success' && data.data?.link) {
+        return {
+          checkoutUrl: data.data.link,
+          txRef,
+        };
+      }
+    } catch (err: any) {
+      this.logger.error(`Failed to generate Flutterwave checkout link: ${err.message}`);
+    }
+
+    return null;
+  }
+
+  /**
+   * 1. Multi-Step Registration: Individual Organizer
+   */
+  async registerIndividual(dto: RegisterOrganizerIndividualDto) {
+    const email = dto.email.toLowerCase().trim();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException('An account with this email address already exists');
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(dto.password, salt);
+    const plan = await this.resolvePlan(dto.planId);
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        fullName: dto.fullName,
+        phone: dto.phone,
+        role: UserRole.ORGANIZER_INDIVIDUAL,
+        profile: {
+          create: {
+            bio: dto.bio,
+            company: dto.city,
+          },
+        },
+      },
+      include: {
+        profile: true,
+      },
+    });
+
+    const skipPayment = dto.skipPayment !== false;
+    let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
+
+    if (!skipPayment && plan.price > 0) {
+      checkoutResult = await this.generatePlanCheckoutUrl(user, plan);
+    }
+
+    await this.prisma.platformSetting.upsert({
+      where: { key: `PLAN_USER_${user.id}` },
+      update: {
+        value: JSON.stringify({
+          planId: plan.id,
+          planName: plan.name,
+          price: plan.price,
+          cycle: plan.cycle,
+          isPaid: plan.price === 0,
+          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          selectedAt: new Date().toISOString(),
+        }),
+      },
+      create: {
+        key: `PLAN_USER_${user.id}`,
+        value: JSON.stringify({
+          planId: plan.id,
+          planName: plan.name,
+          price: plan.price,
+          cycle: plan.cycle,
+          isPaid: plan.price === 0,
+          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          selectedAt: new Date().toISOString(),
+        }),
+        description: `Plan assigned to user ${user.id}`,
+      },
+    });
+
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        phone: user.phone,
+        role: user.role,
+        profile: user.profile,
+      },
+      selectedPlan: {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        cycle: plan.cycle,
+        isPaid: plan.price === 0,
+        status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      checkoutUrl: checkoutResult?.checkoutUrl || null,
+      txRef: checkoutResult?.txRef || null,
+    };
+  }
+
+  /**
+   * 2. Multi-Step Registration: Agency Organizer
+   */
+  async registerAgency(dto: RegisterOrganizerAgencyDto) {
+    const email = dto.email.toLowerCase().trim();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException('An account with this email address already exists');
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(dto.password, salt);
+    const plan = await this.resolvePlan(dto.planId);
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        fullName: dto.fullName,
+        phone: dto.phone,
+        role: UserRole.ORGANIZER_AGENCY,
+        agencyProfile: {
+          create: {
+            agencyName: dto.agencyName,
+            billingEmail: dto.billingEmail || email,
+            corporateTaxId: dto.corporateTaxId,
+            headquarters: dto.headquarters,
+            website: dto.website,
+          },
+        },
+      },
+      include: {
+        agencyProfile: true,
+      },
+    });
+
+    const skipPayment = dto.skipPayment !== false;
+    let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
+
+    if (!skipPayment && plan.price > 0) {
+      checkoutResult = await this.generatePlanCheckoutUrl(user, plan);
+    }
+
+    await this.prisma.platformSetting.upsert({
+      where: { key: `PLAN_USER_${user.id}` },
+      update: {
+        value: JSON.stringify({
+          planId: plan.id,
+          planName: plan.name,
+          price: plan.price,
+          cycle: plan.cycle,
+          isPaid: plan.price === 0,
+          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          selectedAt: new Date().toISOString(),
+        }),
+      },
+      create: {
+        key: `PLAN_USER_${user.id}`,
+        value: JSON.stringify({
+          planId: plan.id,
+          planName: plan.name,
+          price: plan.price,
+          cycle: plan.cycle,
+          isPaid: plan.price === 0,
+          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          selectedAt: new Date().toISOString(),
+        }),
+        description: `Plan assigned to user ${user.id}`,
+      },
+    });
+
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        phone: user.phone,
+        role: user.role,
+        agencyProfile: user.agencyProfile,
+      },
+      selectedPlan: {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        cycle: plan.cycle,
+        isPaid: plan.price === 0,
+        status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      checkoutUrl: checkoutResult?.checkoutUrl || null,
+      txRef: checkoutResult?.txRef || null,
+    };
+  }
+
+  /**
+   * 3. Multi-Step Registration: Venue Organizer
+   */
+  async registerVenue(dto: RegisterOrganizerVenueDto) {
+    const email = dto.email.toLowerCase().trim();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException('An account with this email address already exists');
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(dto.password, salt);
+    const plan = await this.resolvePlan(dto.planId);
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        fullName: dto.fullName,
+        phone: dto.phone,
+        role: UserRole.ORGANIZER_VENUE,
+        venueProfile: {
+          create: {
+            propertyName: dto.propertyName,
+            address: dto.address,
+            city: dto.city,
+            state: dto.state,
+            country: dto.country || 'Nigeria',
+            compoundCapacity: dto.compoundCapacity || 2500,
+            securityHotline: dto.securityHotline,
+          },
+        },
+      },
+      include: {
+        venueProfile: true,
+      },
+    });
+
+    const skipPayment = dto.skipPayment !== false;
+    let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
+
+    if (!skipPayment && plan.price > 0) {
+      checkoutResult = await this.generatePlanCheckoutUrl(user, plan);
+    }
+
+    await this.prisma.platformSetting.upsert({
+      where: { key: `PLAN_USER_${user.id}` },
+      update: {
+        value: JSON.stringify({
+          planId: plan.id,
+          planName: plan.name,
+          price: plan.price,
+          cycle: plan.cycle,
+          isPaid: plan.price === 0,
+          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          selectedAt: new Date().toISOString(),
+        }),
+      },
+      create: {
+        key: `PLAN_USER_${user.id}`,
+        value: JSON.stringify({
+          planId: plan.id,
+          planName: plan.name,
+          price: plan.price,
+          cycle: plan.cycle,
+          isPaid: plan.price === 0,
+          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          selectedAt: new Date().toISOString(),
+        }),
+        description: `Plan assigned to user ${user.id}`,
+      },
+    });
+
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        phone: user.phone,
+        role: user.role,
+        venueProfile: user.venueProfile,
+      },
+      selectedPlan: {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        cycle: plan.cycle,
+        isPaid: plan.price === 0,
+        status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      checkoutUrl: checkoutResult?.checkoutUrl || null,
+      txRef: checkoutResult?.txRef || null,
+    };
+  }
+
+  /**
+   * 4. Pay/Upgrade Plan from Portal anytime
+   */
+  async payPlan(userId: string, dto: PayPlanDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const plan = await this.resolvePlan(dto.planId);
+
+    if (plan.price === 0) {
+      await this.prisma.platformSetting.upsert({
+        where: { key: `PLAN_USER_${user.id}` },
+        update: {
+          value: JSON.stringify({
+            planId: plan.id,
+            planName: plan.name,
+            price: 0,
+            cycle: plan.cycle,
+            isPaid: true,
+            status: 'ACTIVE',
+            updatedAt: new Date().toISOString(),
+          }),
+        },
+        create: {
+          key: `PLAN_USER_${user.id}`,
+          value: JSON.stringify({
+            planId: plan.id,
+            planName: plan.name,
+            price: 0,
+            cycle: plan.cycle,
+            isPaid: true,
+            status: 'ACTIVE',
+            updatedAt: new Date().toISOString(),
+          }),
+          description: `Plan assigned to user ${user.id}`,
+        },
+      });
+
+      return {
+        isFreePlan: true,
+        plan,
+        status: 'ACTIVE',
+        message: 'Free pass activated successfully',
+      };
+    }
+
+    const checkout = await this.generatePlanCheckoutUrl(user, plan, dto.redirectUrl);
+
+    if (!checkout) {
+      throw new BadRequestException('Could not generate Flutterwave payment link. Check gateway keys.');
+    }
+
+    return {
+      isFreePlan: false,
+      plan,
+      checkoutUrl: checkout.checkoutUrl,
+      txRef: checkout.txRef,
+      status: 'PAYMENT_PENDING',
     };
   }
 }

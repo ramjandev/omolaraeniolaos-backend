@@ -22,6 +22,10 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AuthResponseDto, TokenResponseDto } from './dto/auth-response.dto';
+import { RegisterOrganizerIndividualDto } from './dto/register-organizer-individual.dto';
+import { RegisterOrganizerAgencyDto } from './dto/register-organizer-agency.dto';
+import { RegisterOrganizerVenueDto } from './dto/register-organizer-venue.dto';
+import { PayPlanDto } from './dto/pay-plan.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUserDto } from '../../common/dto/current-user.dto';
@@ -50,6 +54,56 @@ export class AuthController {
   })
   async register(@Body() dto: RegisterDto): Promise<AuthResponseDto> {
     return this.authService.register(dto);
+  }
+
+  @Post('register/individual')
+  @ResponseMessage('Individual organizer registered successfully')
+  @ApiOperation({
+    summary:
+      'Multi-step registration for Individual Organizer with profile and plan selection (payment skippable)',
+  })
+  @ApiBody({ type: RegisterOrganizerIndividualDto })
+  @ApiResponse({ status: 201, description: 'Individual organizer created and logged in' })
+  async registerIndividual(@Body() dto: RegisterOrganizerIndividualDto) {
+    return this.authService.registerIndividual(dto);
+  }
+
+  @Post('register/agency')
+  @ResponseMessage('Agency organizer registered successfully')
+  @ApiOperation({
+    summary:
+      'Multi-step registration for Agency Organizer with agency profile and plan selection (payment skippable)',
+  })
+  @ApiBody({ type: RegisterOrganizerAgencyDto })
+  @ApiResponse({ status: 201, description: 'Agency organizer created and logged in' })
+  async registerAgency(@Body() dto: RegisterOrganizerAgencyDto) {
+    return this.authService.registerAgency(dto);
+  }
+
+  @Post('register/venue')
+  @ResponseMessage('Venue organizer registered successfully')
+  @ApiOperation({
+    summary:
+      'Multi-step registration for Venue Organizer with venue profile and plan selection (payment skippable)',
+  })
+  @ApiBody({ type: RegisterOrganizerVenueDto })
+  @ApiResponse({ status: 201, description: 'Venue organizer created and logged in' })
+  async registerVenue(@Body() dto: RegisterOrganizerVenueDto) {
+    return this.authService.registerVenue(dto);
+  }
+
+  @Post('plan/pay')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ResponseMessage('Plan payment initiated successfully')
+  @ApiOperation({
+    summary:
+      'Initiate Flutterwave payment for chosen plan anytime after login (if skipped during registration)',
+  })
+  @ApiBody({ type: PayPlanDto })
+  @ApiResponse({ status: 200, description: 'Flutterwave checkout link and reference generated' })
+  async payPlan(@CurrentUser() user: CurrentUserDto, @Body() dto: PayPlanDto) {
+    return this.authService.payPlan(user.id, dto);
   }
 
   @Post('login')

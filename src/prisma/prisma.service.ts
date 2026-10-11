@@ -38,70 +38,75 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   private async seedInitialUsers() {
     try {
-      const adminExists = await this.user.findUnique({
-        where: { email: 'admin@mceniesvite.com' },
-      });
+      this.logger.log('Ensuring 6 core role accounts are seeded with Password123!...');
+      const salt = await bcrypt.genSalt(10);
+      const passwordHash = await bcrypt.hash('Password123!', salt);
 
-      if (!adminExists) {
-        this.logger.log('Seeding initial demo ecosystem accounts...');
-        const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash('SecurePassword123!', salt);
+      const demoUsers = [
+        {
+          email: 'admin@mceniesvite.com',
+          fullName: 'Super Administrator',
+          role: UserRole.SUPER_ADMIN,
+        },
+        {
+          email: 'individual@mceniesvite.com',
+          fullName: 'James Obi (Individual Host)',
+          role: UserRole.ORGANIZER_INDIVIDUAL,
+        },
+        {
+          email: 'organizer@mceniesvite.com',
+          fullName: 'Omolara Eniola',
+          role: UserRole.ORGANIZER_INDIVIDUAL,
+        },
+        {
+          email: 'agency@mceniesvite.com',
+          fullName: 'Adebayo Ogunlesi (Agency Director)',
+          role: UserRole.ORGANIZER_AGENCY,
+        },
+        {
+          email: 'venue@mceniesvite.com',
+          fullName: 'Folake Adeleke (Venue Manager)',
+          role: UserRole.ORGANIZER_VENUE,
+        },
+        {
+          email: 'gatestaff@mceniesvite.com',
+          fullName: 'Chidi Okonkwo (Gate Lead)',
+          role: UserRole.GATE_STAFF,
+        },
+        {
+          email: 'gate@mceniesvite.com',
+          fullName: 'Gate Staff Lead',
+          role: UserRole.GATE_STAFF,
+        },
+        {
+          email: 'guest@mceniesvite.com',
+          fullName: 'Amara Nwosu (Guest Attendee)',
+          role: UserRole.GUEST,
+        },
+      ];
 
-        const demoUsers = [
-          {
-            email: 'admin@mceniesvite.com',
-            fullName: 'Super Administrator',
-            role: UserRole.SUPER_ADMIN,
+      for (const u of demoUsers) {
+        await this.user.upsert({
+          where: { email: u.email },
+          update: {
+            passwordHash,
+            role: u.role,
           },
-          {
-            email: 'organizer@mceniesvite.com',
-            fullName: 'Omolara Eniola',
-            role: UserRole.ORGANIZER_INDIVIDUAL,
-          },
-          {
-            email: 'agency@mceniesvite.com',
-            fullName: 'Zenith Agency Director',
-            role: UserRole.ORGANIZER_AGENCY,
-          },
-          {
-            email: 'venue@mceniesvite.com',
-            fullName: 'Eko Grand Venue Manager',
-            role: UserRole.ORGANIZER_VENUE,
-          },
-          {
-            email: 'gate@mceniesvite.com',
-            fullName: 'Gate Staff Lead',
-            role: UserRole.GATE_STAFF,
-          },
-          {
-            email: 'guest@mceniesvite.com',
-            fullName: 'Demo Attendee Guest',
-            role: UserRole.GUEST,
-          },
-        ];
-
-        for (const u of demoUsers) {
-          await this.user.upsert({
-            where: { email: u.email },
-            update: {},
-            create: {
-              email: u.email,
-              passwordHash,
-              fullName: u.fullName,
-              role: u.role,
-              profile: {
-                create: {},
-              },
+          create: {
+            email: u.email,
+            passwordHash,
+            fullName: u.fullName,
+            role: u.role,
+            profile: {
+              create: {},
             },
-          });
-        }
-        this.logger.log('Initial demo accounts seeded successfully for all 6 roles.');
+          },
+        });
+      }
+      this.logger.log('Initial demo accounts confirmed for all 6 roles.');
+      const eventsCount = await this.event.count();
+      if (eventsCount === 0) {
         await this.seedInitialEvents();
-      } else {
-        const eventsCount = await this.event.count();
-        if (eventsCount === 0) {
-          await this.seedInitialEvents();
-        }
       }
     } catch (err: any) {
       this.logger.warn(`Auto-seeding skipped: ${err.message}`);

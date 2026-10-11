@@ -1,5 +1,5 @@
-import { Controller, Get, Query, UseGuards, Inject } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Param, Query, UseGuards, Inject } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -57,6 +57,16 @@ export class AdminDashboardController {
     @Query('search') search?: string,
   ) {
     return this.adminService.getDashboardActiveEvents(page, limit, search);
+  }
+
+  @Get('events/:id')
+  @ResponseMessage('Admin single event details retrieved successfully')
+  @ApiOperation({
+    summary: '[Admin Only] Retrieve single event details with organizer, venue/agency relations, ticket tiers, schedules, and attendance metrics',
+  })
+  @ApiResponse({ status: 200, description: 'Single event full detail returned' })
+  async getEventById(@Param('id') id: string) {
+    return this.adminService.getAdminEventById(id);
   }
 
   @Get('metrics')

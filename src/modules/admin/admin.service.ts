@@ -332,6 +332,51 @@ export class AdminService {
   }
 
   /**
+   * 5. Single Event details for Admin with full relations
+   */
+  async getAdminEventById(id: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id },
+      include: {
+        organizer: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            role: true,
+            avatarUrl: true,
+            agencyProfile: true,
+            venueProfile: true,
+          },
+        },
+        ticketTiers: true,
+        schedules: true,
+        venueSpace: true,
+        agencyClient: true,
+        tableZones: {
+          include: {
+            assignments: true,
+          },
+        },
+        _count: {
+          select: {
+            attendees: true,
+            orders: true,
+            communications: true,
+          },
+        },
+      },
+    });
+
+    if (!event) {
+      throw new NotFoundException(`Event with ID ${id} not found`);
+    }
+
+    return event;
+  }
+
+  /**
    * Consolidated Telemetry combining relational data
    */
   async getMetrics() {

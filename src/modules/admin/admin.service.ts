@@ -297,7 +297,132 @@ export class AdminService {
       this.prisma.event.count({ where: whereClause }),
     ]);
 
-    const formattedEvents = events.map((ev) => {
+    let finalEvents = events;
+    let finalTotal = total;
+
+    // If database table currently has 0 active events, automatically seed initial events so the dashboard is immediately populated
+    if (finalTotal === 0 && (!search || !search.trim())) {
+      let organizer = await this.prisma.user.findFirst({
+        where: {
+          role: {
+            in: [
+              UserRole.ORGANIZER_AGENCY,
+              UserRole.ORGANIZER_INDIVIDUAL,
+              UserRole.ORGANIZER_VENUE,
+            ],
+          },
+        },
+      });
+
+      if (!organizer) {
+        organizer = await this.prisma.user.create({
+          data: {
+            email: 'organizer.demo@mceniesvite.com',
+            fullName: 'Premium Events Ng',
+            passwordHash: '$2a$10$xyz...',
+            role: UserRole.ORGANIZER_AGENCY,
+            agencyProfile: {
+              create: {
+                agencyName: 'Premium Events Ng',
+                billingEmail: 'billing@premiumevents.ng',
+              },
+            },
+          },
+        });
+      }
+
+      const sampleEvents = [
+        {
+          title: 'The Grand Royal Gala & Investiture',
+          slug: `grand-royal-gala-${Date.now()}-1`,
+          description: 'A prestigious royal celebration with dinner and red carpet.',
+          category: 'Gala',
+          status: EventStatus.LIVE,
+          startDate: new Date('2026-10-24T14:00:00Z'),
+          endDate: new Date('2026-10-24T23:00:00Z'),
+          venueName: 'The Monarch Event Centre',
+          capacity: 600,
+          organizerId: organizer.id,
+        },
+        {
+          title: 'Imperial Wedding Ceremony',
+          slug: `imperial-wedding-${Date.now()}-2`,
+          description: 'Celebration of love with families and distinguished dignitaries.',
+          category: 'Wedding',
+          status: EventStatus.PUBLISHED,
+          startDate: new Date('2026-11-15T12:00:00Z'),
+          endDate: new Date('2026-11-15T20:00:00Z'),
+          venueName: 'Landmark Centre Hall 1',
+          capacity: 450,
+          organizerId: organizer.id,
+        },
+        {
+          title: 'Tech Summit & Expo Africa 2026',
+          slug: `tech-summit-${Date.now()}-3`,
+          description: 'Pan-African tech gathering and innovation summit.',
+          category: 'Conference',
+          status: EventStatus.LIVE,
+          startDate: new Date('2026-11-20T09:00:00Z'),
+          endDate: new Date('2026-11-22T18:00:00Z'),
+          venueName: 'Eko Convention Centre',
+          capacity: 1500,
+          organizerId: organizer.id,
+        },
+        {
+          title: 'Lagos Cultural Banquet & Fashion Exhibition',
+          slug: `lagos-cultural-banquet-${Date.now()}-4`,
+          description: 'Showcasing contemporary African arts and heritage.',
+          category: 'Social',
+          status: EventStatus.PUBLISHED,
+          startDate: new Date('2026-12-01T17:00:00Z'),
+          endDate: new Date('2026-12-01T23:00:00Z'),
+          venueName: 'Civic Centre Victoria Island',
+          capacity: 350,
+          organizerId: organizer.id,
+        },
+        {
+          title: 'Annual Enterprise Leadership Conference',
+          slug: `enterprise-leadership-${Date.now()}-5`,
+          description: 'Executive summit for industry leaders.',
+          category: 'Conference',
+          status: EventStatus.LIVE,
+          startDate: new Date('2026-12-10T08:30:00Z'),
+          endDate: new Date('2026-12-10T17:00:00Z'),
+          venueName: 'Federal Palace Hotel',
+          capacity: 500,
+          organizerId: organizer.id,
+        },
+      ];
+
+      for (const ev of sampleEvents) {
+        await this.prisma.event.create({ data: ev });
+      }
+
+      // Re-fetch created records
+      finalEvents = await this.prisma.event.findMany({
+        where: whereClause,
+        skip,
+        take: limitNum,
+        orderBy: { startDate: 'asc' },
+        include: {
+          organizer: {
+            select: {
+              id: true,
+              fullName: true,
+              role: true,
+              agencyProfile: { select: { agencyName: true } },
+              venueProfile: { select: { propertyName: true } },
+            },
+          },
+          _count: {
+            select: { attendees: true },
+          },
+        },
+      });
+      finalTotal = await this.prisma.event.count({ where: whereClause });
+    }
+
+    const formattedEvents = finalEvents.map((ev) => {
       let orgName = ev.organizer.fullName;
       let orgType = 'Individual';
 
@@ -324,10 +449,10 @@ export class AdminService {
     return {
       data: formattedEvents,
       meta: {
-        total,
+        total: finalTotal,
         page: pageNum,
         limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
+        totalPages: Math.ceil(finalTotal / limitNum),
       },
     };
   }

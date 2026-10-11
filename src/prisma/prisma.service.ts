@@ -96,9 +96,83 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
           });
         }
         this.logger.log('Initial demo accounts seeded successfully for all 6 roles.');
+        await this.seedInitialEvents();
+      } else {
+        const eventsCount = await this.event.count();
+        if (eventsCount === 0) {
+          await this.seedInitialEvents();
+        }
       }
     } catch (err: any) {
       this.logger.warn(`Auto-seeding skipped: ${err.message}`);
+    }
+  }
+
+  private async seedInitialEvents() {
+    try {
+      const organizer = await this.user.findFirst({
+        where: {
+          role: {
+            in: [
+              UserRole.ORGANIZER_AGENCY,
+              UserRole.ORGANIZER_INDIVIDUAL,
+              UserRole.ORGANIZER_VENUE,
+            ],
+          },
+        },
+      });
+
+      if (!organizer) return;
+
+      this.logger.log('Seeding initial active platform events...');
+
+      const sampleEvents = [
+        {
+          title: 'The Grand Royal Gala & Investiture',
+          slug: `grand-royal-gala-${Date.now()}`,
+          description: 'A prestigious royal celebration with dinner and red carpet.',
+          category: 'Gala',
+          status: 'LIVE' as any,
+          startDate: new Date('2026-10-24T14:00:00Z'),
+          endDate: new Date('2026-10-24T23:00:00Z'),
+          venueName: 'The Monarch Event Centre',
+          capacity: 600,
+        },
+        {
+          title: 'Tech Fest Africa 2026',
+          slug: `tech-fest-africa-${Date.now()}`,
+          description: 'Pan-African tech gathering and innovation summit.',
+          category: 'Conference',
+          status: 'PUBLISHED' as any,
+          startDate: new Date('2026-11-12T09:00:00Z'),
+          endDate: new Date('2026-11-14T18:00:00Z'),
+          venueName: 'Eko Convention Centre',
+          capacity: 1500,
+        },
+        {
+          title: 'Imperial Wedding Ceremony',
+          slug: `imperial-wedding-${Date.now()}`,
+          description: 'Celebration of love with families and distinguished dignitaries.',
+          category: 'Wedding',
+          status: 'LIVE' as any,
+          startDate: new Date('2026-12-05T12:00:00Z'),
+          endDate: new Date('2026-12-05T20:00:00Z'),
+          venueName: 'Landmark Centre Hall 1',
+          capacity: 450,
+        },
+      ];
+
+      for (const ev of sampleEvents) {
+        await this.event.create({
+          data: {
+            ...ev,
+            organizerId: organizer.id,
+          },
+        });
+      }
+      this.logger.log('Initial events seeded successfully into PostgreSQL.');
+    } catch (e: any) {
+      this.logger.warn(`Event auto-seeding skipped: ${e.message}`);
     }
   }
 }

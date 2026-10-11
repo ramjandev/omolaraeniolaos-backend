@@ -1470,5 +1470,242 @@ export class AdminService {
       message: 'Provider health check succeeded',
     };
   }
+
+  /**
+   * 6. ANALYTICS DOMAIN METHODS (Pure Relational DB Data)
+   */
+
+  /**
+   * 6.1 Top 6 KPI Cards for Platform Analytics
+   */
+  async getAnalyticsOverview() {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [
+      newOrganizers,
+      eventsCreated,
+      rsvpsProcessed,
+      whatsappComms,
+      totalAttendees,
+      voiceAttendees,
+      checkIns,
+    ] = await Promise.all([
+      this.prisma.user.count({
+        where: {
+          role: {
+            in: [
+              UserRole.ORGANIZER_INDIVIDUAL,
+              UserRole.ORGANIZER_AGENCY,
+              UserRole.ORGANIZER_VENUE,
+            ],
+          },
+          createdAt: { gte: startOfMonth },
+        },
+      }),
+      this.prisma.event.count({
+        where: { createdAt: { gte: startOfMonth } },
+      }),
+      this.prisma.attendee.count({
+        where: { createdAt: { gte: startOfMonth } },
+      }),
+      this.prisma.guestCommunication.aggregate({
+        _sum: { recipientsCount: true },
+        where: { channel: 'WHATSAPP' as any, createdAt: { gte: startOfMonth } },
+      }),
+      this.prisma.attendee.count(),
+      this.prisma.attendee.count({
+        where: {
+          notes: { contains: 'Voice RSVP', mode: 'insensitive' },
+        },
+      }),
+      this.prisma.attendee.count({
+        where: { checkInTime: { not: null } },
+      }),
+    ]);
+
+    const voicePct = totalAttendees > 0 ? Math.round((voiceAttendees / totalAttendees) * 100) : 0;
+    const whatsappCount = whatsappComms._sum.recipientsCount || 0;
+
+    return {
+      newOrganizers: {
+        count: newOrganizers,
+      },
+      eventsCreated: {
+        count: eventsCreated,
+      },
+      rsvpsProcessed: {
+        count: rsvpsProcessed,
+      },
+      whatsappMessagesSent: {
+        count: whatsappCount,
+      },
+      voiceRsvpUsage: {
+        percentage: voicePct,
+      },
+      checkInVolume: {
+        count: checkIns,
+      },
+    };
+  }
+
+  /**
+   * 6.2 Organizer Growth Over Time (by Individual, Agency, Venue)
+   */
+  async getOrganizerGrowth(range: string = '6_months') {
+    const monthsCount = range === '12_months' ? 12 : 6;
+    const now = new Date();
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    const startDate = new Date(now.getFullYear(), now.getMonth() - monthsCount + 1, 1);
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        role: {
+          in: [
+            UserRole.ORGANIZER_INDIVIDUAL,
+            UserRole.ORGANIZER_AGENCY,
+            UserRole.ORGANIZER_VENUE,
+          ],
+        },
+        createdAt: { gte: startDate },
+      },
+      select: {
+        role: true,
+        createdAt: true,
+      },
+    });
+
+    const series = [];
+    for (let i = monthsCount - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mYear = d.getFullYear();
+      const mIndex = d.getMonth();
+      const mName = monthNames[mIndex];
+
+      const monthUsers = users.filter((u) => {
+        const uDate = new Date(u.createdAt);
+        return uDate.getFullYear() === mYear && uDate.getMonth() === mIndex;
+      });
+
+      const ind = monthUsers.filter((u) => u.role === UserRole.ORGANIZER_INDIVIDUAL).length;
+      const agency = monthUsers.filter((u) => u.role === UserRole.ORGANIZER_AGENCY).length;
+      const venue = monthUsers.filter((u) => u.role === UserRole.ORGANIZER_VENUE).length;
+
+      series.push({
+        month: mName,
+        individual: ind,
+        agency: agency,
+        venue: venue,
+        total: ind + agency + venue,
+      });
+    }
+
+    return {
+      range,
+      data: series,
+    };
+  }
+
+  /**
+   * 6.3 Events Created Over Time
+   */
+  async getEventsCreatedOverTime(range: string = '6_months') {
+    const monthsCount = range === '12_months' ? 12 : 6;
+    const now = new Date();
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    const startDate = new Date(now.getFullYear(), now.getMonth() - monthsCount + 1, 1);
+
+    const events = await this.prisma.event.findMany({
+      where: {
+        createdAt: { gte: startDate },
+      },
+      select: {
+        createdAt: true,
+      },
+    });
+
+    const series = [];
+    for (let i = monthsCount - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mYear = d.getFullYear();
+      const mIndex = d.getMonth();
+      const mName = monthNames[mIndex];
+
+      const count = events.filter((e) => {
+        const eDate = new Date(e.createdAt);
+        return eDate.getFullYear() === mYear && eDate.getMonth() === mIndex;
+      }).length;
+
+      series.push({
+        month: mName,
+        eventsCount: count,
+      });
+    }
+
+    return {
+      range,
+      data: series,
+    };
+  }
+
+  /**
+   * 6.4 Voice RSVP Adoption Breakdown (Button, Voice Note, Text Reply)
+   */
+  async getVoiceRsvpAdoption() {
+    const [total, voiceCount, textCount] = await Promise.all([
+      this.prisma.attendee.count(),
+      this.prisma.attendee.count({
+        where: { notes: { contains: 'Voice RSVP', mode: 'insensitive' } },
+      }),
+      this.prisma.attendee.count({
+        where: { notes: { contains: 'Text Reply', mode: 'insensitive' } },
+      }),
+    ]);
+
+    const buttonCount = Math.max(0, total - voiceCount - textCount);
+
+    const buttonPct = total > 0 ? Math.round((buttonCount / total) * 100) : 0;
+    const voicePct = total > 0 ? Math.round((voiceCount / total) * 100) : 0;
+    const textPct = total > 0 ? Math.max(0, 100 - buttonPct - voicePct) : 0;
+
+    return {
+      totalResponses: total,
+      breakdown: {
+        button: {
+          count: buttonCount,
+          percentage: buttonPct,
+        },
+        voiceNote: {
+          count: voiceCount,
+          percentage: voicePct,
+        },
+        textReply: {
+          count: textCount,
+          percentage: textPct,
+        },
+      },
+    };
+  }
+
+  /**
+   * 6.5 Consolidated Analytics Payload (All in one)
+   */
+  async getAllAnalyticsData(range: string = '6_months') {
+    const [overview, organizerGrowth, eventsCreated, voiceRsvpAdoption] = await Promise.all([
+      this.getAnalyticsOverview(),
+      this.getOrganizerGrowth(range),
+      this.getEventsCreatedOverTime(range),
+      this.getVoiceRsvpAdoption(),
+    ]);
+
+    return {
+      overview,
+      organizerGrowth,
+      eventsCreated,
+      voiceRsvpAdoption,
+    };
+  }
 }
 

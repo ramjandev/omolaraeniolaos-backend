@@ -16,6 +16,17 @@ export interface PlanItem {
   updatedAt?: string;
 }
 
+export interface DashboardEventItem {
+  id: string;
+  name: string;
+  organizer: string;
+  organizerType: 'Agency' | 'Venue' | 'Individual';
+  status: 'Active';
+  date: string;
+  guests: number;
+  eventType: 'Gala' | 'Wedding' | 'Conference' | 'Social' | 'Exhibition';
+}
+
 @Injectable()
 export class AdminService {
   // In-memory / cache store for custom plans layered on top of platform presets
@@ -86,9 +97,116 @@ export class AdminService {
     },
   ];
 
+  // Mock Active Events for Dashboard Table matching Figma design
+  private activeEventsList: DashboardEventItem[] = [
+    {
+      id: 'evt_1',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Premium Events Ng',
+      organizerType: 'Agency',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 150,
+      eventType: 'Gala',
+    },
+    {
+      id: 'evt_2',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Royale Occasions',
+      organizerType: 'Agency',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 110,
+      eventType: 'Wedding',
+    },
+    {
+      id: 'evt_3',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Eko Convention Centre',
+      organizerType: 'Venue',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 120,
+      eventType: 'Gala',
+    },
+    {
+      id: 'evt_4',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'James Obi',
+      organizerType: 'Individual',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 90,
+      eventType: 'Conference',
+    },
+    {
+      id: 'evt_5',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Premium Events Ng',
+      organizerType: 'Agency',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 190,
+      eventType: 'Social',
+    },
+    {
+      id: 'evt_6',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Premium Events Ng',
+      organizerType: 'Agency',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 250,
+      eventType: 'Conference',
+    },
+    {
+      id: 'evt_7',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Premium Events Ng',
+      organizerType: 'Agency',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 240,
+      eventType: 'Gala',
+    },
+    {
+      id: 'evt_8',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Premium Events Ng',
+      organizerType: 'Agency',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 50,
+      eventType: 'Exhibition',
+    },
+    {
+      id: 'evt_9',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Premium Events Ng',
+      organizerType: 'Agency',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 200,
+      eventType: 'Wedding',
+    },
+    {
+      id: 'evt_10',
+      name: 'The Grand Royal Gala & Investiture',
+      organizer: 'Premium Events Ng',
+      organizerType: 'Agency',
+      status: 'Active',
+      date: '15 Jan 2026',
+      guests: 230,
+      eventType: 'Social',
+    },
+  ];
+
   constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
-  async getMetrics() {
+  /**
+   * 1. Dashboard Tab: 4 Top KPI Cards
+   */
+  async getDashboardSummary() {
     const [totalUsers, activeEventsCount, completedEventsCount] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.event.count({ where: { status: { in: ['LIVE', 'PUBLISHED'] } } }),
@@ -96,22 +214,49 @@ export class AdminService {
     ]);
 
     return {
-      summary: {
-        totalOrganizers: totalUsers > 0 ? totalUsers : 142,
-        organizersSubtitle: '98 Individual · 31 Agency · 13 Venue',
-        activeEvents: activeEventsCount > 0 ? activeEventsCount : 847,
-        activeEventsSubtitle: 'Currently live or upcoming',
-        completedEvents: completedEventsCount > 0 ? completedEventsCount : 2341,
-        completedEventsSubtitle: 'Lifetime platform total',
-        platformRevenue: '₦4.2M',
-        platformRevenueSubtitle: 'September 2026',
+      totalOrganizers: {
+        value: totalUsers > 0 ? totalUsers : 142,
+        subtitle: '98 Individual · 31 Agency · 13 Venue',
       },
-      organizerBreakdown: {
-        individual: { count: 98, percentage: 69, color: '#6D3A1B' },
-        agency: { count: 31, percentage: 22, color: '#C87A2D' },
-        venue: { count: 13, percentage: 9, color: '#8F9094' },
+      activeEvents: {
+        value: activeEventsCount > 0 ? activeEventsCount : 847,
+        subtitle: 'Currently live or upcoming',
       },
-      revenueByOrganizerType: [
+      completedEvents: {
+        value: completedEventsCount > 0 ? completedEventsCount : 2341,
+        subtitle: 'Lifetime platform total',
+      },
+      platformRevenue: {
+        value: '₦4.2M',
+        subtitle: 'September 2026',
+      },
+    };
+  }
+
+  /**
+   * 2. Dashboard Tab: Organizer Breakdown (Doughnut Chart)
+   */
+  async getOrganizerBreakdown() {
+    return {
+      title: 'Organizer Breakdown',
+      subtitle: 'Distribution by organizer type',
+      items: [
+        { type: 'Individual', count: 98, percentage: 69, color: '#6D3A1B' },
+        { type: 'Agency', count: 31, percentage: 22, color: '#C87A2D' },
+        { type: 'Venue', count: 13, percentage: 9, color: '#8F9094' },
+      ],
+      totalOrganizers: 142,
+    };
+  }
+
+  /**
+   * 3. Dashboard Tab: Revenue by Organizer Type Table
+   */
+  async getRevenueByOrganizerType() {
+    return {
+      period: 'September 2026',
+      subtitle: 'full breakdown on Revenue & Plans',
+      rows: [
         {
           type: 'Individual',
           organizers: 94,
@@ -135,9 +280,72 @@ export class AdminService {
         },
       ],
       totals: {
-        totalOrganizers: 138,
+        totalOrganizer: 138,
         totalRevenue: '₦4.2M',
       },
+    };
+  }
+
+  /**
+   * 4. Dashboard Tab: Active Events Table with Pagination
+   */
+  async getDashboardActiveEvents(page: number = 1, limit: number = 10, search?: string) {
+    let filtered = [...this.activeEventsList];
+    if (search && search.trim()) {
+      const q = search.toLowerCase();
+      filtered = filtered.filter(
+        (e) =>
+          e.name.toLowerCase().includes(q) ||
+          e.organizer.toLowerCase().includes(q) ||
+          e.eventType.toLowerCase().includes(q),
+      );
+    }
+
+    const startIndex = (page - 1) * limit;
+    const paginated = filtered.slice(startIndex, startIndex + limit);
+
+    return {
+      data: paginated,
+      meta: {
+        total: 150, // Lifetime active events count from Figma
+        showing: filtered.length,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(150 / limit),
+      },
+    };
+  }
+
+  /**
+   * Consolidated Telemetry
+   */
+  async getMetrics() {
+    const [summary, breakdown, revenueTable, activeEvents] = await Promise.all([
+      this.getDashboardSummary(),
+      this.getOrganizerBreakdown(),
+      this.getRevenueByOrganizerType(),
+      this.getDashboardActiveEvents(1, 10),
+    ]);
+
+    return {
+      summary: {
+        totalOrganizers: summary.totalOrganizers.value,
+        organizersSubtitle: summary.totalOrganizers.subtitle,
+        activeEvents: summary.activeEvents.value,
+        activeEventsSubtitle: summary.activeEvents.subtitle,
+        completedEvents: summary.completedEvents.value,
+        completedEventsSubtitle: summary.completedEvents.subtitle,
+        platformRevenue: summary.platformRevenue.value,
+        platformRevenueSubtitle: summary.platformRevenue.subtitle,
+      },
+      organizerBreakdown: {
+        individual: breakdown.items[0],
+        agency: breakdown.items[1],
+        venue: breakdown.items[2],
+      },
+      revenueByOrganizerType: revenueTable.rows,
+      totals: revenueTable.totals,
+      activeEvents: activeEvents.data,
     };
   }
 
@@ -192,7 +400,6 @@ export class AdminService {
 
     this.plansStore.unshift(newPlan);
 
-    // Also persist into PlatformSetting store as audit history if table exists
     try {
       await this.prisma.platformSetting.upsert({
         where: { key: `PLAN_${newPlan.id}` },
@@ -203,16 +410,11 @@ export class AdminService {
           description: `Plan created for ${dto.organizerType}`,
         },
       });
-    } catch {
-      // Non-blocking in case DB migration is running
-    }
+    } catch {}
 
     return newPlan;
   }
 
-  /**
-   * Retrieve plans, optionally filtered by organizer type (Individual, Agency, Venue)
-   */
   async getPlans(type?: OrganizerType): Promise<PlanItem[]> {
     if (type) {
       return this.plansStore.filter(
@@ -222,9 +424,6 @@ export class AdminService {
     return this.plansStore;
   }
 
-  /**
-   * Get single plan by ID
-   */
   async getPlanById(id: string): Promise<PlanItem> {
     const plan = this.plansStore.find((p) => p.id === id);
     if (!plan) {
@@ -233,9 +432,6 @@ export class AdminService {
     return plan;
   }
 
-  /**
-   * Update / Edit existing plan
-   */
   async updatePlan(id: string, dto: UpdatePlanDto): Promise<PlanItem> {
     const planIndex = this.plansStore.findIndex((p) => p.id === id);
     if (planIndex === -1) {
@@ -281,9 +477,6 @@ export class AdminService {
     return updatedPlan;
   }
 
-  /**
-   * Delete existing plan
-   */
   async deletePlan(id: string): Promise<{ deleted: boolean; id: string }> {
     const planIndex = this.plansStore.findIndex((p) => p.id === id);
     if (planIndex === -1) {

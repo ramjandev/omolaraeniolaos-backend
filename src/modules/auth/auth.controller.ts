@@ -16,7 +16,6 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -35,26 +34,6 @@ import { ResponseMessage } from '../../common/decorators/response-message.decora
 @Controller('auth')
 export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
-
-  @Post('register')
-  @ResponseMessage('User registered successfully')
-  @ApiOperation({
-    summary:
-      'Register a new user account (Individual, Agency, Venue, Staff, or Guest)',
-  })
-  @ApiBody({ type: RegisterDto })
-  @ApiResponse({
-    status: 201,
-    description: 'User account created with access and refresh tokens',
-    type: AuthResponseDto,
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Account with this email already exists',
-  })
-  async register(@Body() dto: RegisterDto): Promise<AuthResponseDto> {
-    return this.authService.register(dto);
-  }
 
   @Post('register/individual')
   @ResponseMessage('Individual organizer registered successfully')

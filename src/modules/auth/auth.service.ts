@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { UserRole, EventStatus, EventFormat } from '@prisma/client';
+import { UserRole, EventStatus, EventFormat, SpaceType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
@@ -67,10 +67,31 @@ const DEFAULT_PLANS: Record<string, { id: string; name: string; price: number; c
     cycle: 'Monthly',
     organizerType: 'Agency',
   },
+  plan_venue_starter: {
+    id: 'plan_venue_starter',
+    name: 'Venue Starter',
+    price: 0,
+    cycle: 'Monthly',
+    organizerType: 'Venue',
+  },
+  plan_venue_pro: {
+    id: 'plan_venue_pro',
+    name: 'Venue Pro',
+    price: 150000,
+    cycle: 'Monthly',
+    organizerType: 'Venue',
+  },
   plan_venue_1: {
     id: 'plan_venue_1',
     name: 'Venue Enterprise Pass',
     price: 250000,
+    cycle: 'Monthly',
+    organizerType: 'Venue',
+  },
+  plan_venue_enterprise: {
+    id: 'plan_venue_enterprise',
+    name: 'Venue Enterprise Pass',
+    price: 350000,
     cycle: 'Monthly',
     organizerType: 'Venue',
   },
@@ -808,8 +829,14 @@ export class AuthService {
 
   /**
    * 3. Multi-Step Registration: Venue Organizer
+   * Handles Steps 1-5: Business Information, Primary Venue Setup, Spaces & Halls,
+   * Team Member Invitations, Plan Selection, and Checkout / Dashboard Skip.
    */
   async registerVenue(dto: RegisterOrganizerVenueDto) {
+    if (dto.confirmPassword && dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Confirm password does not match password');
+    }
+
     const email = dto.email.toLowerCase().trim();
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -818,8 +845,64 @@ export class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
-    const plan = await this.resolvePlan(dto.planId);
+    const planId = dto.planId || 'plan_venue_1';
+    const plan = await this.resolvePlan(planId);
 
+    // Apply 20% annual discount if annual billing cycle chosen
+    const isAnnual = dto.billingCycle?.toLowerCase() === 'annual';
+    const planPrice = isAnnual && plan.price > 0
+      ? Math.round(plan.price * 12 * 0.8)
+      : plan.price;
+
+    const planToCharge = {
+      ...plan,
+      price: planPrice,
+      cycle: isAnnual ? 'Annual' : 'Monthly',
+    };
+
+    const mapSpaceType = (t?: string): SpaceType => {
+      if (!t) return SpaceType.BALLROOM;
+      const upper = t.toUpperCase().replace(/\s+/g, '_');
+      const validTypes: Record<string, SpaceType> = {
+        BALLROOM: SpaceType.BALLROOM,
+        AUDITORIUM: SpaceType.AUDITORIUM,
+        TERRACE: SpaceType.TERRACE,
+        BOARDROOM: SpaceType.BOARDROOM,
+        EXHIBITION_HALL: SpaceType.EXHIBITION_HALL,
+        BANQUET_HALL: SpaceType.BANQUET_HALL,
+        ROOFTOP: SpaceType.ROOFTOP,
+      };
+      return validTypes[upper] || SpaceType.BALLROOM;
+    };
+
+    const venueCapacity = Number(dto.capacity) || 2500;
+    const venueAddress = dto.address || 'Lagos, Nigeria';
+    const primaryVenueName = dto.venueName || dto.businessName;
+
+    // Prepare spaces creation
+    const spacesData =
+      dto.spaces && dto.spaces.length > 0
+        ? dto.spaces.map((s) => ({
+            name: s.name,
+            type: mapSpaceType(s.type),
+            capacity: Number(s.capacity) || 100,
+            squareMeters: (Number(s.capacity) || 100) * 1.5,
+            dailyRate: 0.0,
+            currency: 'NGN',
+            amenities: s.operatingHours ? [`Hours: ${s.operatingHours}`] : [],
+          }))
+        : [
+            {
+              name: primaryVenueName,
+              type: mapSpaceType(dto.venueType),
+              capacity: venueCapacity,
+              squareMeters: venueCapacity * 1.5,
+              dailyRate: 0.0,
+              currency: 'NGN',
+            },
+          ];
+
+    // Atomically create User, VenueProfile, Spaces, and UserProfile
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -829,27 +912,103 @@ export class AuthService {
         role: UserRole.ORGANIZER_VENUE,
         venueProfile: {
           create: {
-            propertyName: dto.propertyName,
-            address: dto.address,
-            city: dto.city,
-            state: dto.state,
-            country: dto.country || 'Nigeria',
-            compoundCapacity: dto.compoundCapacity || 2500,
-            securityHotline: dto.securityHotline,
+            propertyName: dto.businessName,
+            address: venueAddress,
+            city: 'Lagos',
+            country: 'Nigeria',
+            compoundCapacity: venueCapacity,
+            spaces: {
+              create: spacesData,
+            },
+          },
+        },
+        profile: {
+          create: {
+            company: dto.businessName,
+            jobTitle: dto.businessType,
+            bio: dto.description || `Hospitality group: ${dto.businessName}`,
           },
         },
       },
       include: {
-        venueProfile: true,
+        venueProfile: {
+          include: {
+            spaces: true,
+          },
+        },
+        profile: true,
       },
     });
 
-    const skipPayment = dto.skipPayment !== false;
+    const venueProfile = user.venueProfile!;
+
+    // Save full venue setup metadata
+    await this.prisma.platformSetting.upsert({
+      where: { key: `VENUE_CONFIG_${venueProfile.id}` },
+      update: {
+        value: JSON.stringify({
+          businessName: dto.businessName,
+          businessType: dto.businessType,
+          logoUrl: dto.logoUrl || null,
+          venueName: primaryVenueName,
+          venueType: dto.venueType || 'Ballroom',
+          capacity: venueCapacity,
+          address: venueAddress,
+          description: dto.description || null,
+          spaces: dto.spaces || [],
+          invitedMembers: dto.invitedMembers || [],
+          billingCycle: dto.billingCycle || 'monthly',
+          updatedAt: new Date().toISOString(),
+        }),
+      },
+      create: {
+        key: `VENUE_CONFIG_${venueProfile.id}`,
+        value: JSON.stringify({
+          businessName: dto.businessName,
+          businessType: dto.businessType,
+          logoUrl: dto.logoUrl || null,
+          venueName: primaryVenueName,
+          venueType: dto.venueType || 'Ballroom',
+          capacity: venueCapacity,
+          address: venueAddress,
+          description: dto.description || null,
+          spaces: dto.spaces || [],
+          invitedMembers: dto.invitedMembers || [],
+          billingCycle: dto.billingCycle || 'monthly',
+          createdAt: new Date().toISOString(),
+        }),
+        description: `Workspace metadata for venue ${dto.businessName}`,
+      },
+    });
+
+    // Save pending team invitations from Step 4
+    if (dto.invitedMembers && dto.invitedMembers.length > 0) {
+      await this.prisma.platformSetting.upsert({
+        where: { key: `VENUE_INVITATIONS_${venueProfile.id}` },
+        update: {
+          value: JSON.stringify(dto.invitedMembers),
+        },
+        create: {
+          key: `VENUE_INVITATIONS_${venueProfile.id}`,
+          value: JSON.stringify(dto.invitedMembers),
+          description: `Pending team invitations for venue ${dto.businessName}`,
+        },
+      });
+    }
+
+    const isFree = planToCharge.price === 0;
+    const isSkipped = dto.skipPayment === true;
     let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
 
-    if (!skipPayment && plan.price > 0) {
-      checkoutResult = await this.generatePlanCheckoutUrl(user, plan);
+    if (!isFree && !isSkipped) {
+      checkoutResult = await this.generatePlanCheckoutUrl(user, planToCharge);
     }
+
+    const planStatus = isFree
+      ? 'ACTIVE'
+      : isSkipped
+        ? 'PAYMENT_PENDING'
+        : 'CHECKOUT_INITIALIZED';
 
     await this.prisma.platformSetting.upsert({
       where: { key: `PLAN_USER_${user.id}` },
@@ -857,10 +1016,11 @@ export class AuthService {
         value: JSON.stringify({
           planId: plan.id,
           planName: plan.name,
-          price: plan.price,
-          cycle: plan.cycle,
-          isPaid: plan.price === 0,
-          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          price: planToCharge.price,
+          cycle: planToCharge.cycle,
+          isPaid: isFree,
+          status: planStatus,
+          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
           selectedAt: new Date().toISOString(),
         }),
       },
@@ -869,13 +1029,14 @@ export class AuthService {
         value: JSON.stringify({
           planId: plan.id,
           planName: plan.name,
-          price: plan.price,
-          cycle: plan.cycle,
-          isPaid: plan.price === 0,
-          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          price: planToCharge.price,
+          cycle: planToCharge.cycle,
+          isPaid: isFree,
+          status: planStatus,
+          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
           selectedAt: new Date().toISOString(),
         }),
-        description: `Plan assigned to user ${user.id}`,
+        description: `Plan assigned to venue user ${user.id}`,
       },
     });
 
@@ -888,15 +1049,35 @@ export class AuthService {
         fullName: user.fullName,
         phone: user.phone,
         role: user.role,
-        venueProfile: user.venueProfile,
+        venueProfile: {
+          id: venueProfile.id,
+          propertyName: venueProfile.propertyName,
+          address: venueProfile.address,
+          city: venueProfile.city,
+          compoundCapacity: venueProfile.compoundCapacity,
+        },
+        profile: user.profile,
+      },
+      venue: {
+        id: venueProfile.id,
+        businessName: dto.businessName,
+        businessType: dto.businessType,
+        logoUrl: dto.logoUrl || null,
+        venueName: primaryVenueName,
+        venueType: dto.venueType || 'Ballroom',
+        capacity: venueCapacity,
+        address: venueAddress,
+        description: dto.description || null,
+        spaces: venueProfile.spaces,
+        invitedMembers: dto.invitedMembers || [],
       },
       selectedPlan: {
         id: plan.id,
         name: plan.name,
-        price: plan.price,
-        cycle: plan.cycle,
-        isPaid: plan.price === 0,
-        status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+        price: planToCharge.price,
+        cycle: planToCharge.cycle,
+        isPaid: isFree,
+        status: planStatus,
       },
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,

@@ -8,7 +8,7 @@ import { FilterOrganizersDto, FilterOrganizerType, FilterOrganizerStatus } from 
 export interface PlanItem {
   id: string;
   planName: string;
-  price: string;
+  price: number;
   organizerType: OrganizerType;
   billingCycle: BillingCycle;
   features: string[];
@@ -23,7 +23,7 @@ export class AdminService {
     {
       id: 'plan_ind_1',
       planName: 'Essential Event Pass',
-      price: '₦00',
+      price: 0,
       organizerType: OrganizerType.INDIVIDUAL,
       billingCycle: BillingCycle.PER_EVENT,
       features: [
@@ -39,7 +39,7 @@ export class AdminService {
     {
       id: 'plan_ind_2',
       planName: 'Grand Celebration Pass',
-      price: '₦35,000',
+      price: 35000,
       organizerType: OrganizerType.INDIVIDUAL,
       billingCycle: BillingCycle.PER_EVENT,
       features: [
@@ -55,7 +55,7 @@ export class AdminService {
     {
       id: 'plan_agency_1',
       planName: 'Agency Pro Pass',
-      price: '₦120,000',
+      price: 120000,
       organizerType: OrganizerType.AGENCY,
       billingCycle: BillingCycle.MONTHLY,
       features: [
@@ -71,7 +71,7 @@ export class AdminService {
     {
       id: 'plan_venue_1',
       planName: 'Venue Enterprise Pass',
-      price: '₦250,000',
+      price: 250000,
       organizerType: OrganizerType.VENUE,
       billingCycle: BillingCycle.MONTHLY,
       features: [
@@ -575,7 +575,7 @@ export class AdminService {
         startDate: event.startDate,
         endDate: event.endDate,
         timezone: event.timezone,
-        venueName: event.venueName || event.venueSpace?.name || 'The Monarch Event Centre',
+        venueName: event.venueName || event.venueSpace?.name || null,
         address: event.address,
         capacity: event.capacity,
         coverImageUrl: event.coverImageUrl,
@@ -589,8 +589,7 @@ export class AdminService {
           value: confirmedCount,
         },
         checkedIn: {
-          value: checkedInCount > 0 ? checkedInCount : null,
-          formatted: checkedInCount > 0 ? String(checkedInCount) : '--',
+          value: checkedInCount,
         },
       },
       rsvpStatusBreakdown: [
@@ -620,7 +619,7 @@ export class AdminService {
         organizerType,
         eventDate: event.startDate,
         eventType: event.category,
-        location: event.venueName || event.venueSpace?.name || 'The Monarch Event Centre',
+        location: event.venueName || event.venueSpace?.name || null,
         billing: billingPlan,
       },
       relations: {
@@ -861,16 +860,14 @@ export class AdminService {
   }
 
   async createPlan(dto: CreatePlanDto): Promise<PlanItem> {
-    const formattedPrice = typeof dto.price === 'number' 
-      ? `₦${dto.price.toLocaleString()}` 
-      : dto.price.startsWith('₦') 
-      ? dto.price 
-      : `₦${dto.price}`;
+    const rawPrice = typeof dto.price === 'number'
+      ? dto.price
+      : Number(String(dto.price).replace(/[^0-9.]/g, '')) || 0;
 
     const newPlan: PlanItem = {
       id: `plan_${dto.organizerType.toLowerCase()}_${Date.now()}`,
       planName: dto.planName,
-      price: formattedPrice,
+      price: rawPrice,
       organizerType: dto.organizerType,
       billingCycle: dto.billingCycle,
       features: dto.features && dto.features.length > 0 ? dto.features : ['Core Platform Access'],
@@ -919,20 +916,18 @@ export class AdminService {
     }
 
     const existing = this.plansStore[planIndex];
-    let formattedPrice = existing.price;
+    let numericPrice = existing.price;
 
     if (dto.price !== undefined) {
-      formattedPrice = typeof dto.price === 'number'
-        ? `₦${dto.price.toLocaleString()}`
-        : dto.price.startsWith('₦')
+      numericPrice = typeof dto.price === 'number'
         ? dto.price
-        : `₦${dto.price}`;
+        : Number(String(dto.price).replace(/[^0-9.]/g, '')) || 0;
     }
 
     const updatedPlan: PlanItem = {
       ...existing,
       planName: dto.planName ?? existing.planName,
-      price: formattedPrice,
+      price: numericPrice,
       organizerType: dto.organizerType ?? existing.organizerType,
       billingCycle: dto.billingCycle ?? existing.billingCycle,
       features: dto.features ?? existing.features,
@@ -979,73 +974,114 @@ export class AdminService {
    */
 
   /**
-   * 1. 4 KPI Cards for Revenue & Plans Overview
+   * 1. 4 KPI Cards for Revenue & Plans Overview (Pure DB Metrics)
    */
   async getRevenueOverview() {
-    const [totalRevenueAgg, agencyCount, venueCount, ordersCount] = await Promise.all([
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
+    const [
+      totalRevenueAgg,
+      currentMonthAgg,
+      lastMonthAgg,
+      agencyCount,
+      venueCount,
+    ] = await Promise.all([
       this.prisma.order.aggregate({
         _sum: { totalAmount: true },
         where: { status: 'PAID' },
       }),
+      this.prisma.order.aggregate({
+        _sum: { totalAmount: true },
+        where: {
+          status: 'PAID',
+          createdAt: { gte: currentMonthStart },
+        },
+      }),
+      this.prisma.order.aggregate({
+        _sum: { totalAmount: true },
+        where: {
+          status: 'PAID',
+          createdAt: { gte: lastMonthStart, lte: lastMonthEnd },
+        },
+      }),
       this.prisma.user.count({ where: { role: UserRole.ORGANIZER_AGENCY } }),
       this.prisma.user.count({ where: { role: UserRole.ORGANIZER_VENUE } }),
-      this.prisma.order.count({ where: { status: 'PAID' } }),
     ]);
 
     const totalRevenue = totalRevenueAgg._sum.totalAmount || 0;
+    const curMonthRev = currentMonthAgg._sum.totalAmount || 0;
+    const lastMonthRev = lastMonthAgg._sum.totalAmount || 0;
+
+    let momGrowthPercentage = 0;
+    if (lastMonthRev > 0) {
+      momGrowthPercentage = Math.round(((curMonthRev - lastMonthRev) / lastMonthRev) * 100);
+    } else if (curMonthRev > 0) {
+      momGrowthPercentage = 100;
+    }
+
+    const availablePlansCount = this.plansStore.filter((p) => !p.isArchived).length;
     const activeSubscriptions = agencyCount + venueCount;
 
     return {
       totalRevenue: {
-        amount: totalRevenue > 0 ? totalRevenue : 4200000,
-        formatted: totalRevenue > 0 ? `₦${(totalRevenue / 1000000).toFixed(1)}M` : '₦4.2M',
-        subtitle: 'September 2026',
+        amount: totalRevenue,
       },
       momGrowth: {
-        percentage: 8,
-        formatted: '+8%',
-        subtitle: 'vs. August 2026',
+        percentage: momGrowthPercentage,
       },
       availablePlans: {
-        count: this.plansStore.filter((p) => !p.isArchived).length || 6,
-        subtitle: 'Plans across all type of organizer',
+        count: availablePlansCount,
       },
       activeSubscriptions: {
-        count: activeSubscriptions > 0 ? activeSubscriptions : 44,
-        subtitle: 'Agency + Venue plans',
+        count: activeSubscriptions,
       },
     };
   }
 
   /**
-   * 2. Monthly Revenue Breakdown Chart
+   * 2. Monthly Revenue Breakdown Chart (Aggregated DB Data)
    */
   async getRevenueBreakdown(period: string = 'Yearly') {
-    const months = [
-      { month: 'Jan', amount: 23 },
-      { month: 'Feb', amount: 40 },
-      { month: 'Mar', amount: 23 },
-      { month: 'Apr', amount: 40 },
-      { month: 'May', amount: 35 },
-      { month: 'Jun', amount: 45 },
-      { month: 'Jul', amount: 33 },
-      { month: 'Aug', amount: 38 },
-      { month: 'Sep', amount: 33 },
-      { month: 'Oct', amount: 45 },
-      { month: 'Nov', amount: 35 },
-      { month: 'Dec', amount: 42 },
-    ];
+    const currentYear = new Date().getFullYear();
+    const startOfYear = new Date(currentYear, 0, 1);
+    const endOfYear = new Date(currentYear, 11, 31, 23, 59, 59, 999);
+
+    const paidOrders = await this.prisma.order.findMany({
+      where: {
+        status: 'PAID',
+        createdAt: {
+          gte: startOfYear,
+          lte: endOfYear,
+        },
+      },
+      select: {
+        totalAmount: true,
+        createdAt: true,
+      },
+    });
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthlyData = monthNames.map((month, index) => {
+      const monthOrders = paidOrders.filter((o) => new Date(o.createdAt).getMonth() === index);
+      const amount = monthOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      return {
+        month,
+        amount,
+      };
+    });
 
     return {
       period,
-      currency: 'NGN',
-      unit: 'thousands',
-      data: months,
+      year: currentYear,
+      data: monthlyData,
     };
   }
 
   /**
-   * 3. Revenue Transactions Table with filtering & pagination
+   * 3. Revenue Transactions Table with filtering & pagination (Real DB Orders)
    */
   async getRevenueTransactions(
     status: string = 'All',
@@ -1105,9 +1141,8 @@ export class AdminService {
       this.prisma.order.count({ where: whereClause }),
     ]);
 
-    // If live orders exist, return them; otherwise return structured transactions matching the UI design
-    let transactionData = orders.map((o) => {
-      let orgType: 'Agency' | 'Venue' | 'Individual' = 'Individual';
+    const transactionData = orders.map((o) => {
+      let orgType = 'Individual';
       const organizer = o.event?.organizer || o.buyer;
       let orgName = organizer?.fullName || o.buyerName || 'Organizer';
 
@@ -1125,37 +1160,20 @@ export class AdminService {
         date: o.createdAt,
         organizer: orgName,
         organizerType: orgType,
-        amount: `₦${o.totalAmount.toLocaleString()}`,
-        rawAmount: o.totalAmount,
-        status: o.status === 'PAID' ? 'Paid' : o.status === 'FAILED' ? 'Failed' : 'Pending',
-        plan: o.event?.title || 'Event Pass',
+        amount: o.totalAmount,
+        currency: o.currency,
+        status: o.status,
+        plan: o.event?.title || null,
       };
     });
-
-    // Seed preset transactions if fresh database
-    if (transactionData.length === 0 && (!search || !search.trim())) {
-      const presets = [
-        { id: '1', txId: 'TXN-8392A7B1', date: '15 Jan 2026', organizer: 'Premium Events Ng', organizerType: 'Agency', amount: '₦120,000', status: 'Paid', plan: 'Pro Subscription' },
-        { id: '2', txId: 'TXN-4F7D2C9E', date: '15 Jan 2026', organizer: 'Royale Occasions', organizerType: 'Agency', amount: '₦120,000', status: 'Paid', plan: 'Essential Event Pass' },
-        { id: '3', txId: 'TXN-1B8E5D3F', date: '15 Jan 2026', organizer: 'Eko Convention Centre', organizerType: 'Venue', amount: '₦120,000', status: 'Failed', plan: 'Venue Subscription' },
-        { id: '4', txId: 'TXN-7C9A4E2B', date: '15 Jan 2026', organizer: 'James Obi', organizerType: 'Individual', amount: '₦120,000', status: 'Failed', plan: 'Venue Subscription' },
-        { id: '5', txId: 'TXN-5D3F8A1C', date: '15 Jan 2026', organizer: 'Premium Events Ng', organizerType: 'Agency', amount: '₦120,000', status: 'Paid', plan: 'Essential Event Pass' },
-        { id: '6', txId: 'TXN-2E7B9D4F', date: '15 Jan 2026', organizer: 'Premium Events Ng', organizerType: 'Agency', amount: '₦120,000', status: 'Pending', plan: 'Venue Subscription' },
-        { id: '7', txId: 'TXN-6A1C3F8E', date: '15 Jan 2026', organizer: 'Premium Events Ng', organizerType: 'Agency', amount: '₦120,000', status: 'Paid', plan: 'Grand Celebration Pass' },
-        { id: '8', txId: 'TXN-9B4E7D2A', date: '15 Jan 2026', organizer: 'Premium Events Ng', organizerType: 'Agency', amount: '₦120,000', status: 'Paid', plan: 'Pro Subscription' },
-        { id: '9', txId: 'TXN-3F8E1B5D', date: '15 Jan 2026', organizer: 'Premium Events Ng', organizerType: 'Agency', amount: '₦120,000', status: 'Paid', plan: 'Grand Celebration Pass' },
-        { id: '10', txId: 'TXN-8D2B7C9A', date: '15 Jan 2026', organizer: 'Premium Events Ng', organizerType: 'Agency', amount: '₦120,000', status: 'Pending', plan: 'Essential Event Pass' },
-      ];
-      transactionData = presets as any;
-    }
 
     return {
       data: transactionData,
       meta: {
-        total: totalOrders > 0 ? totalOrders : 150,
+        total: totalOrders,
         page: pageNum,
         limit: limitNum,
-        totalPages: Math.ceil((totalOrders > 0 ? totalOrders : 150) / limitNum),
+        totalPages: totalOrders > 0 ? Math.ceil(totalOrders / limitNum) : 0,
       },
     };
   }

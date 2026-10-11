@@ -241,9 +241,9 @@ export class AdminService {
       title: 'Organizer Breakdown',
       subtitle: 'Distribution by organizer type',
       items: [
-        { type: 'Individual', count: 98, percentage: 69, color: '#6D3A1B' },
-        { type: 'Agency', count: 31, percentage: 22, color: '#C87A2D' },
-        { type: 'Venue', count: 13, percentage: 9, color: '#8F9094' },
+        { type: 'Individual', count: 98, percentage: 69 },
+        { type: 'Agency', count: 31, percentage: 22 },
+        { type: 'Venue', count: 13, percentage: 9 },
       ],
       totalOrganizers: 142,
     };

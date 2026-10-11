@@ -39,10 +39,31 @@ const DEFAULT_PLANS: Record<string, { id: string; name: string; price: number; c
     cycle: 'Per-event',
     organizerType: 'Individual',
   },
+  plan_agency_solo: {
+    id: 'plan_agency_solo',
+    name: 'Solo Planner',
+    price: 0,
+    cycle: 'Monthly',
+    organizerType: 'Agency',
+  },
+  plan_agency_pro: {
+    id: 'plan_agency_pro',
+    name: 'Agency Pro',
+    price: 120000,
+    cycle: 'Monthly',
+    organizerType: 'Agency',
+  },
   plan_agency_1: {
     id: 'plan_agency_1',
-    name: 'Agency Pro Pass',
+    name: 'Agency Pro',
     price: 120000,
+    cycle: 'Monthly',
+    organizerType: 'Agency',
+  },
+  plan_agency_enterprise: {
+    id: 'plan_agency_enterprise',
+    name: 'Enterprise Pass',
+    price: 350000,
     cycle: 'Monthly',
     organizerType: 'Agency',
   },
@@ -584,8 +605,14 @@ export class AuthService {
 
   /**
    * 2. Multi-Step Registration: Agency Organizer
+   * Handles Steps 1-5: Lead User Account, Agency Workspace Profile, Work Scope & Templates,
+   * Team Member Invitations, Plan Selection, and Checkout / Dashboard skip.
    */
   async registerAgency(dto: RegisterOrganizerAgencyDto) {
+    if (dto.confirmPassword && dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Confirm password does not match password');
+    }
+
     const email = dto.email.toLowerCase().trim();
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -594,8 +621,26 @@ export class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
-    const plan = await this.resolvePlan(dto.planId);
+    const planId = dto.planId || 'plan_agency_pro';
+    const plan = await this.resolvePlan(planId);
 
+    // Apply 20% annual discount if annual billing cycle chosen
+    const isAnnual = dto.billingCycle?.toLowerCase() === 'annual';
+    const planPrice = isAnnual && plan.price > 0
+      ? Math.round(plan.price * 12 * 0.8)
+      : plan.price;
+
+    const planToCharge = {
+      ...plan,
+      price: planPrice,
+      cycle: isAnnual ? 'Annual' : 'Monthly',
+    };
+
+    const headquarters = [dto.city, dto.country || 'Nigeria']
+      .filter(Boolean)
+      .join(', ');
+
+    // Atomically create User, AgencyProfile, and UserProfile
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -606,24 +651,91 @@ export class AuthService {
         agencyProfile: {
           create: {
             agencyName: dto.agencyName,
-            billingEmail: dto.billingEmail || email,
-            corporateTaxId: dto.corporateTaxId,
-            headquarters: dto.headquarters,
-            website: dto.website,
+            billingEmail: email,
+            headquarters: headquarters || undefined,
+            website: dto.logoUrl || undefined,
+            standardCommission: 15.0,
+          },
+        },
+        profile: {
+          create: {
+            company: dto.agencyName,
+            jobTitle: dto.agencyType,
+            bio: `Agency specializing in ${(dto.eventTypes || []).join(', ') || 'Event Planning'}`,
           },
         },
       },
       include: {
         agencyProfile: true,
+        profile: true,
       },
     });
 
-    const skipPayment = dto.skipPayment !== false;
+    const agencyProfile = user.agencyProfile!;
+
+    // Save full agency workspace configuration (event types, volume, team size)
+    await this.prisma.platformSetting.upsert({
+      where: { key: `AGENCY_CONFIG_${agencyProfile.id}` },
+      update: {
+        value: JSON.stringify({
+          agencyName: dto.agencyName,
+          agencyType: dto.agencyType,
+          logoUrl: dto.logoUrl || null,
+          country: dto.country || 'Nigeria',
+          city: dto.city || null,
+          eventTypes: dto.eventTypes || [],
+          eventsPerYear: dto.eventsPerYear || null,
+          teamSize: dto.teamSize || null,
+          billingCycle: dto.billingCycle || 'monthly',
+          updatedAt: new Date().toISOString(),
+        }),
+      },
+      create: {
+        key: `AGENCY_CONFIG_${agencyProfile.id}`,
+        value: JSON.stringify({
+          agencyName: dto.agencyName,
+          agencyType: dto.agencyType,
+          logoUrl: dto.logoUrl || null,
+          country: dto.country || 'Nigeria',
+          city: dto.city || null,
+          eventTypes: dto.eventTypes || [],
+          eventsPerYear: dto.eventsPerYear || null,
+          teamSize: dto.teamSize || null,
+          billingCycle: dto.billingCycle || 'monthly',
+          createdAt: new Date().toISOString(),
+        }),
+        description: `Workspace metadata for agency ${dto.agencyName}`,
+      },
+    });
+
+    // Save pending team invitations from Step 3
+    if (dto.invitedMembers && dto.invitedMembers.length > 0) {
+      await this.prisma.platformSetting.upsert({
+        where: { key: `AGENCY_INVITATIONS_${agencyProfile.id}` },
+        update: {
+          value: JSON.stringify(dto.invitedMembers),
+        },
+        create: {
+          key: `AGENCY_INVITATIONS_${agencyProfile.id}`,
+          value: JSON.stringify(dto.invitedMembers),
+          description: `Pending team invitations for ${dto.agencyName}`,
+        },
+      });
+    }
+
+    const isFree = planToCharge.price === 0;
+    const isSkipped = dto.skipPayment === true;
     let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
 
-    if (!skipPayment && plan.price > 0) {
-      checkoutResult = await this.generatePlanCheckoutUrl(user, plan);
+    if (!isFree && !isSkipped) {
+      checkoutResult = await this.generatePlanCheckoutUrl(user, planToCharge);
     }
+
+    const planStatus = isFree
+      ? 'ACTIVE'
+      : isSkipped
+        ? 'PAYMENT_PENDING'
+        : 'CHECKOUT_INITIALIZED';
 
     await this.prisma.platformSetting.upsert({
       where: { key: `PLAN_USER_${user.id}` },
@@ -631,10 +743,11 @@ export class AuthService {
         value: JSON.stringify({
           planId: plan.id,
           planName: plan.name,
-          price: plan.price,
-          cycle: plan.cycle,
-          isPaid: plan.price === 0,
-          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          price: planToCharge.price,
+          cycle: planToCharge.cycle,
+          isPaid: isFree,
+          status: planStatus,
+          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
           selectedAt: new Date().toISOString(),
         }),
       },
@@ -643,13 +756,14 @@ export class AuthService {
         value: JSON.stringify({
           planId: plan.id,
           planName: plan.name,
-          price: plan.price,
-          cycle: plan.cycle,
-          isPaid: plan.price === 0,
-          status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+          price: planToCharge.price,
+          cycle: planToCharge.cycle,
+          isPaid: isFree,
+          status: planStatus,
+          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
           selectedAt: new Date().toISOString(),
         }),
-        description: `Plan assigned to user ${user.id}`,
+        description: `Plan assigned to agency user ${user.id}`,
       },
     });
 
@@ -663,14 +777,27 @@ export class AuthService {
         phone: user.phone,
         role: user.role,
         agencyProfile: user.agencyProfile,
+        profile: user.profile,
+      },
+      agency: {
+        id: agencyProfile.id,
+        name: dto.agencyName,
+        type: dto.agencyType,
+        logoUrl: dto.logoUrl || null,
+        country: dto.country || 'Nigeria',
+        city: dto.city || null,
+        eventTypes: dto.eventTypes || [],
+        eventsPerYear: dto.eventsPerYear || null,
+        teamSize: dto.teamSize || null,
+        invitedMembers: dto.invitedMembers || [],
       },
       selectedPlan: {
         id: plan.id,
         name: plan.name,
-        price: plan.price,
-        cycle: plan.cycle,
-        isPaid: plan.price === 0,
-        status: plan.price === 0 ? 'ACTIVE' : skipPayment ? 'PAYMENT_PENDING' : 'CHECKOUT_INITIALIZED',
+        price: planToCharge.price,
+        cycle: planToCharge.cycle,
+        isPaid: isFree,
+        status: planStatus,
       },
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,

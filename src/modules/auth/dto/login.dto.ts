@@ -6,7 +6,11 @@ export class LoginDto {
   @IsEmail()
   email: string;
 
-  @ApiProperty({ example: 'SecurePassword123!', description: 'Account password', type: String })
+  @ApiProperty({
+    example: 'Password123!',
+    description: 'Account password (all seeded accounts use Password123!)',
+    type: String,
+  })
   @IsString()
   @IsNotEmpty()
   password: string;

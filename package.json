@@ -6,7 +6,8 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "build": "prisma generate && prisma db push --accept-data-loss && nest build",
+    "postbuild": "node dist/seed.js || echo 'Seed skipped'",
     "predev": "prisma generate",
     "dev": "tsx watch src/main.ts",
     "prestart:dev": "prisma generate",

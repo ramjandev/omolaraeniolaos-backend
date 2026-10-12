@@ -47,9 +47,34 @@ Architecture for all 6 ecosystem roles:
 - **Gate Staff**: High-concurrency QR scanner validation and shift logs.
 - **Guest**: Attendee passes, session schedules, and profile.
 - **Super Admin**: Ecosystem telemetry matching Figma dashboard (142 Organizers, 847 Events, ₦4.2M Revenue).
+
+---
+
+### 🔑 Demo Credentials (Password for ALL accounts: \`Password123!\`)
+
+| # | Role | Email |
+|---|------|-------|
+| 1 | SUPER_ADMIN | admin@mceniesvite.com |
+| 2 | ORGANIZER_INDIVIDUAL | individual@mceniesvite.com |
+| 3 | ORGANIZER_AGENCY | agency@mceniesvite.com |
+| 4 | ORGANIZER_VENUE | venue@mceniesvite.com |
+| 5 | GATE_STAFF | gatestaff@mceniesvite.com |
+| 6 | GUEST | guest@mceniesvite.com |
       `,
     )
     .setVersion('1.0.0')
+    .addTag(
+      'Individual - Dashboard',
+      'Dashboard telemetry, setup checklist, and live guest activities for Individual Organizers',
+    )
+    .addTag(
+      'Individual - Events',
+      'Events lifecycle, 6-step setup, guest roster & RSVP, table seating blueprint, and live turnstile monitor for Individual Organizers',
+    )
+    .addTag(
+      'Individual - Gate Management',
+      'Dedicated Gate Staff management, assignment, and invitation for Individual Organizers',
+    )
     .addBearerAuth()
     .build();
 

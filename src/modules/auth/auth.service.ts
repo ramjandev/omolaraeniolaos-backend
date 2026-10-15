@@ -459,7 +459,13 @@ export class AuthService {
         txRef: txRef || history[index].txRef || null,
         paidAt: typeof tx.created_at === 'string' ? tx.created_at : new Date().toISOString(),
       };
-      const planId = meta.planId || (typeof history[index].planId === 'string' ? history[index].planId : '');
+      const savedPlanId = history[index].planId;
+      const planId =
+        typeof meta.planId === 'string' && meta.planId
+          ? meta.planId
+          : typeof savedPlanId === 'string'
+            ? savedPlanId
+            : '';
       if (planId) latest = { planId, amount: Number.isFinite(amount) ? amount : Number(history[index].amount) };
     }
 

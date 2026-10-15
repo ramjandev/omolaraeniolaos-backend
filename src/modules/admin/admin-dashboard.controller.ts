@@ -7,8 +7,11 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Admin Dashboard')
+@ApiTags('01 Super Admin / Dashboard')
 @Controller('admin/dashboard')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiBearerAuth()
 export class AdminDashboardController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 

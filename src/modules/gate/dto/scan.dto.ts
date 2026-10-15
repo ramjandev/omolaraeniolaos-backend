@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class ScanDto {
   @ApiProperty({ example: 'MC-PASS-8F92A-44B', description: 'Unique QR Code hash', type: String })
@@ -16,4 +16,20 @@ export class ScanDto {
   @IsString()
   @IsOptional()
   staffId?: string;
+
+  @ApiProperty({ required: false, description: 'ISO timestamp captured while offline' })
+  @IsString()
+  @IsOptional()
+  scannedAt?: string;
+
+  @ApiProperty({ required: false })
+  @IsString()
+  @IsOptional()
+  clientScanId?: string;
+}
+
+export class SyncScansDto {
+  @ApiProperty({ type: [ScanDto] })
+  @IsArray()
+  scans: ScanDto[];
 }

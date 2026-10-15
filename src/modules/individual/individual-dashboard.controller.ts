@@ -20,7 +20,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUserDto } from '../../common/dto/current-user.dto';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Individual - Dashboard')
+@ApiTags('02 Individual Organizer / Dashboard')
 @Controller(['individual/dashboard', 'organizer/individual/dashboard'])
 @UseGuards(OptionalJwtAuthGuard)
 @ApiBearerAuth()

@@ -24,8 +24,11 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Admin Platform Settings')
+@ApiTags('01 Super Admin / Settings')
 @Controller('admin/settings')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiBearerAuth()
 export class AdminSettingsController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 
@@ -42,7 +45,7 @@ export class AdminSettingsController {
 
   @Put()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Platform settings updated successfully')
   @ApiOperation({
@@ -57,7 +60,7 @@ export class AdminSettingsController {
 
   @Post('test-connection')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Connection test completed')
   @ApiOperation({

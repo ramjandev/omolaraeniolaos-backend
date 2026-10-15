@@ -7,8 +7,13 @@ import { CreateSpaceDto } from './dto/create-space.dto';
 export class VenueService {
   constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
-  async getSpaces() {
+  async getSpaces(userId?: string) {
+    const venue = userId
+      ? await this.prisma.venueProfile.findFirst({ where: { userId } })
+      : null;
+
     return this.prisma.venueSpace.findMany({
+      where: venue ? { venueId: venue.id } : undefined,
       include: {
         venue: { select: { propertyName: true, city: true, country: true } },
       },
@@ -44,8 +49,13 @@ export class VenueService {
     });
   }
 
-  async getBookings() {
+  async getBookings(userId?: string) {
+    const venue = userId
+      ? await this.prisma.venueProfile.findFirst({ where: { userId } })
+      : null;
+
     return this.prisma.venueBooking.findMany({
+      where: venue ? { venueId: venue.id } : undefined,
       include: {
         space: { select: { name: true, type: true } },
         event: { select: { title: true } },
@@ -54,8 +64,13 @@ export class VenueService {
     });
   }
 
-  async getTables() {
+  async getTables(userId?: string) {
+    const venue = userId
+      ? await this.prisma.venueProfile.findFirst({ where: { userId } })
+      : null;
+
     return this.prisma.tableZone.findMany({
+      where: venue ? { space: { venueId: venue.id } } : undefined,
       include: {
         space: { select: { name: true } },
         assignments: true,

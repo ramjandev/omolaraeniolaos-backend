@@ -13,6 +13,7 @@ import { IndividualModule } from './modules/individual/individual.module';
 import { VenueModule } from './modules/venue/venue.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { VoiceRsvpModule } from './modules/voice-rsvp/voice-rsvp.module';
+import { CommunicationsModule } from './modules/communications/communications.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { VoiceRsvpModule } from './modules/voice-rsvp/voice-rsvp.module';
     VenueModule,
     AdminModule,
     VoiceRsvpModule,
+    CommunicationsModule,
   ],
 })
 export class AppModule {}

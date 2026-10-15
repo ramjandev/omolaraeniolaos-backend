@@ -1,10 +1,17 @@
-import { Controller, Get, Query, Inject } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Query, Inject, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 
-@ApiTags('Admin Analytics')
+@ApiTags('01 Super Admin / Analytics')
 @Controller('admin/analytics')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiBearerAuth()
 export class AdminAnalyticsController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 

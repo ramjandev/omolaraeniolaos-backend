@@ -25,7 +25,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUserDto } from '../../common/dto/current-user.dto';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Individual - Gate Management')
+@ApiTags('02 Individual Organizer / Gate Crew')
 @Controller(['individual/gate', 'organizer/individual/gate'])
 @UseGuards(OptionalJwtAuthGuard)
 @ApiBearerAuth()
@@ -79,8 +79,11 @@ export class IndividualGateController {
     status: 200,
     description: 'Assignment saved successfully',
   })
-  async assignStaff(@Body() dto: AssignGateStaffDto) {
-    return this.gateService.assignStaff(dto);
+  async assignStaff(
+    @CurrentUser() user: CurrentUserDto | undefined,
+    @Body() dto: AssignGateStaffDto,
+  ) {
+    return this.gateService.assignStaff(dto, user?.id);
   }
 
   @Post('assign-all')
@@ -94,7 +97,10 @@ export class IndividualGateController {
     status: 200,
     description: 'All gate staff successfully assigned to the event',
   })
-  async assignAllStaff(@Body() dto: AssignAllGateStaffDto) {
-    return this.gateService.assignAllStaff(dto);
+  async assignAllStaff(
+    @CurrentUser() user: CurrentUserDto | undefined,
+    @Body() dto: AssignAllGateStaffDto,
+  ) {
+    return this.gateService.assignAllStaff(dto, user?.id);
   }
 }

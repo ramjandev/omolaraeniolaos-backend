@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, Inject } from '@nestjs/common';
-import { UserRole, EventStatus, UserStatus } from '@prisma/client';
+import { UserRole, EventStatus, UserStatus, PlanOrganizerType, PlanBillingCycle } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePlanDto, OrganizerType, BillingCycle } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -7,7 +7,9 @@ import { FilterOrganizersDto, FilterOrganizerType, FilterOrganizerStatus } from 
 
 export interface PlanItem {
   id: string;
+  slug: string;
   planName: string;
+  description: string | null;
   price: number;
   organizerType: OrganizerType;
   billingCycle: BillingCycle;
@@ -19,73 +21,6 @@ export interface PlanItem {
 
 @Injectable()
 export class AdminService {
-  private plansStore: PlanItem[] = [
-    {
-      id: 'plan_ind_1',
-      planName: 'Essential Event Pass',
-      price: 0,
-      organizerType: OrganizerType.INDIVIDUAL,
-      billingCycle: BillingCycle.PER_EVENT,
-      features: [
-        'Up to 150 Guest RSVP passes',
-        'Direct WhatsApp RSVP link dispatch',
-        'Standard QR Gate Check-in Pass',
-        'Real-time attendance tracking',
-        '30-day post-event analytics',
-      ],
-      isArchived: false,
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'plan_ind_2',
-      planName: 'Grand Celebration Pass',
-      price: 35000,
-      organizerType: OrganizerType.INDIVIDUAL,
-      billingCycle: BillingCycle.PER_EVENT,
-      features: [
-        'Up to 600 Guest passes & VIP tagging',
-        'Automated Multilingual WhatsApp dispatch',
-        'Security gate fraud prevention alerts',
-        'Table & Seating arrangement coordinator',
-        'Zero-data-loss upgrade path to Agency',
-      ],
-      isArchived: false,
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'plan_agency_1',
-      planName: 'Agency Pro Pass',
-      price: 120000,
-      organizerType: OrganizerType.AGENCY,
-      billingCycle: BillingCycle.MONTHLY,
-      features: [
-        'Unlimited active events & clients',
-        'Full team role permissions (Manager, Staff)',
-        'Custom white-label WhatsApp branding',
-        'Multi-gate live sync and turnstile scanner ops',
-        'Dedicated VIP guest concierge & voice notes',
-      ],
-      isArchived: false,
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'plan_venue_1',
-      planName: 'Venue Enterprise Pass',
-      price: 250000,
-      organizerType: OrganizerType.VENUE,
-      billingCycle: BillingCycle.MONTHLY,
-      features: [
-        'Multi-space and hall booking calendar',
-        'Automated guest safety capacity controls',
-        'Turnstile & Gate hardware scanner integration',
-        'Real-time catering & dietary preference telemetry',
-        'Dedicated account manager & 24/7 hotline',
-      ],
-      isArchived: false,
-      createdAt: new Date().toISOString(),
-    },
-  ];
-
   constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
   /**
@@ -100,9 +35,9 @@ export class AdminService {
       completedEventsCount,
       ordersAgg,
     ] = await Promise.all([
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_INDIVIDUAL } }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_AGENCY } }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_VENUE } }),
+      this.prisma.user.count({ where: { role: UserRole.INDIVIDUAL } }),
+      this.prisma.user.count({ where: { role: UserRole.AGENCY } }),
+      this.prisma.user.count({ where: { role: UserRole.VENUE } }),
       this.prisma.event.count({
         where: { status: { in: [EventStatus.LIVE, EventStatus.PUBLISHED] } },
       }),
@@ -134,9 +69,9 @@ export class AdminService {
    */
   async getOrganizerBreakdown() {
     const [individualCount, agencyCount, venueCount] = await Promise.all([
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_INDIVIDUAL } }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_AGENCY } }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_VENUE } }),
+      this.prisma.user.count({ where: { role: UserRole.INDIVIDUAL } }),
+      this.prisma.user.count({ where: { role: UserRole.AGENCY } }),
+      this.prisma.user.count({ where: { role: UserRole.VENUE } }),
     ]);
 
     const total = individualCount + agencyCount + venueCount;
@@ -169,7 +104,7 @@ export class AdminService {
   async getRevenueByOrganizerType() {
     const [individualUsers, agencyUsers, venueUsers] = await Promise.all([
       this.prisma.user.findMany({
-        where: { role: UserRole.ORGANIZER_INDIVIDUAL },
+        where: { role: UserRole.INDIVIDUAL },
         select: {
           id: true,
           eventsCreated: {
@@ -183,7 +118,7 @@ export class AdminService {
         },
       }),
       this.prisma.user.findMany({
-        where: { role: UserRole.ORGANIZER_AGENCY },
+        where: { role: UserRole.AGENCY },
         select: {
           id: true,
           eventsCreated: {
@@ -197,7 +132,7 @@ export class AdminService {
         },
       }),
       this.prisma.user.findMany({
-        where: { role: UserRole.ORGANIZER_VENUE },
+        where: { role: UserRole.VENUE },
         select: {
           id: true,
           eventsCreated: {
@@ -297,139 +232,14 @@ export class AdminService {
       this.prisma.event.count({ where: whereClause }),
     ]);
 
-    let finalEvents = events;
-    let finalTotal = total;
-
-    // If database table currently has 0 active events, automatically seed initial events so the dashboard is immediately populated
-    if (finalTotal === 0 && (!search || !search.trim())) {
-      let organizer = await this.prisma.user.findFirst({
-        where: {
-          role: {
-            in: [
-              UserRole.ORGANIZER_AGENCY,
-              UserRole.ORGANIZER_INDIVIDUAL,
-              UserRole.ORGANIZER_VENUE,
-            ],
-          },
-        },
-      });
-
-      if (!organizer) {
-        organizer = await this.prisma.user.create({
-          data: {
-            email: 'organizer.demo@mceniesvite.com',
-            fullName: 'Premium Events Ng',
-            passwordHash: '$2a$10$xyz...',
-            role: UserRole.ORGANIZER_AGENCY,
-            agencyProfile: {
-              create: {
-                agencyName: 'Premium Events Ng',
-                billingEmail: 'billing@premiumevents.ng',
-              },
-            },
-          },
-        });
-      }
-
-      const sampleEvents = [
-        {
-          title: 'The Grand Royal Gala & Investiture',
-          slug: `grand-royal-gala-${Date.now()}-1`,
-          description: 'A prestigious royal celebration with dinner and red carpet.',
-          category: 'Gala',
-          status: EventStatus.LIVE,
-          startDate: new Date('2026-10-24T14:00:00Z'),
-          endDate: new Date('2026-10-24T23:00:00Z'),
-          venueName: 'The Monarch Event Centre',
-          capacity: 600,
-          organizerId: organizer.id,
-        },
-        {
-          title: 'Imperial Wedding Ceremony',
-          slug: `imperial-wedding-${Date.now()}-2`,
-          description: 'Celebration of love with families and distinguished dignitaries.',
-          category: 'Wedding',
-          status: EventStatus.PUBLISHED,
-          startDate: new Date('2026-11-15T12:00:00Z'),
-          endDate: new Date('2026-11-15T20:00:00Z'),
-          venueName: 'Landmark Centre Hall 1',
-          capacity: 450,
-          organizerId: organizer.id,
-        },
-        {
-          title: 'Tech Summit & Expo Africa 2026',
-          slug: `tech-summit-${Date.now()}-3`,
-          description: 'Pan-African tech gathering and innovation summit.',
-          category: 'Conference',
-          status: EventStatus.LIVE,
-          startDate: new Date('2026-11-20T09:00:00Z'),
-          endDate: new Date('2026-11-22T18:00:00Z'),
-          venueName: 'Eko Convention Centre',
-          capacity: 1500,
-          organizerId: organizer.id,
-        },
-        {
-          title: 'Lagos Cultural Banquet & Fashion Exhibition',
-          slug: `lagos-cultural-banquet-${Date.now()}-4`,
-          description: 'Showcasing contemporary African arts and heritage.',
-          category: 'Social',
-          status: EventStatus.PUBLISHED,
-          startDate: new Date('2026-12-01T17:00:00Z'),
-          endDate: new Date('2026-12-01T23:00:00Z'),
-          venueName: 'Civic Centre Victoria Island',
-          capacity: 350,
-          organizerId: organizer.id,
-        },
-        {
-          title: 'Annual Enterprise Leadership Conference',
-          slug: `enterprise-leadership-${Date.now()}-5`,
-          description: 'Executive summit for industry leaders.',
-          category: 'Conference',
-          status: EventStatus.LIVE,
-          startDate: new Date('2026-12-10T08:30:00Z'),
-          endDate: new Date('2026-12-10T17:00:00Z'),
-          venueName: 'Federal Palace Hotel',
-          capacity: 500,
-          organizerId: organizer.id,
-        },
-      ];
-
-      for (const ev of sampleEvents) {
-        await this.prisma.event.create({ data: ev });
-      }
-
-      // Re-fetch created records
-      finalEvents = await this.prisma.event.findMany({
-        where: whereClause,
-        skip,
-        take: limitNum,
-        orderBy: { startDate: 'asc' },
-        include: {
-          organizer: {
-            select: {
-              id: true,
-              fullName: true,
-              role: true,
-              agencyProfile: { select: { agencyName: true } },
-              venueProfile: { select: { propertyName: true } },
-            },
-          },
-          _count: {
-            select: { attendees: true },
-          },
-        },
-      });
-      finalTotal = await this.prisma.event.count({ where: whereClause });
-    }
-
-    const formattedEvents = finalEvents.map((ev) => {
+    const formattedEvents = events.map((ev) => {
       let orgName = ev.organizer.fullName;
       let orgType = 'Individual';
 
-      if (ev.organizer.role === UserRole.ORGANIZER_AGENCY) {
+      if (ev.organizer.role === UserRole.AGENCY) {
         orgType = 'Agency';
         orgName = ev.organizer.agencyProfile?.agencyName || ev.organizer.fullName;
-      } else if (ev.organizer.role === UserRole.ORGANIZER_VENUE) {
+      } else if (ev.organizer.role === UserRole.VENUE) {
         orgType = 'Venue';
         orgName = ev.organizer.venueProfile?.propertyName || ev.organizer.fullName;
       }
@@ -449,10 +259,10 @@ export class AdminService {
     return {
       data: formattedEvents,
       meta: {
-        total: finalTotal,
+        total,
         page: pageNum,
         limit: limitNum,
-        totalPages: Math.ceil(finalTotal / limitNum),
+        totalPages: Math.ceil(total / limitNum),
       },
     };
   }
@@ -555,11 +365,11 @@ export class AdminService {
     let organizerType = 'Individual';
     let billingPlan = 'Essential Event Pass';
 
-    if (event.organizer.role === UserRole.ORGANIZER_AGENCY) {
+    if (event.organizer.role === UserRole.AGENCY) {
       organizerType = 'Agency';
       organizerName = event.organizer.agencyProfile?.agencyName || event.organizer.fullName;
       billingPlan = 'Included in subscription';
-    } else if (event.organizer.role === UserRole.ORGANIZER_VENUE) {
+    } else if (event.organizer.role === UserRole.VENUE) {
       organizerType = 'Venue';
       organizerName = event.organizer.venueProfile?.propertyName || event.organizer.fullName;
       billingPlan = 'Included in subscription';
@@ -658,9 +468,9 @@ export class AdminService {
 
     // Base condition: only organizers (Individual, Agency, Venue)
     const baseRoles = [
-      UserRole.ORGANIZER_INDIVIDUAL,
-      UserRole.ORGANIZER_AGENCY,
-      UserRole.ORGANIZER_VENUE,
+      UserRole.INDIVIDUAL,
+      UserRole.AGENCY,
+      UserRole.VENUE,
     ];
 
     const whereClause: any = {
@@ -670,11 +480,11 @@ export class AdminService {
     // Filter by Type
     if (filter?.type && filter.type !== FilterOrganizerType.ALL) {
       if (filter.type === FilterOrganizerType.INDIVIDUAL) {
-        whereClause.role = UserRole.ORGANIZER_INDIVIDUAL;
+        whereClause.role = UserRole.INDIVIDUAL;
       } else if (filter.type === FilterOrganizerType.AGENCY) {
-        whereClause.role = UserRole.ORGANIZER_AGENCY;
+        whereClause.role = UserRole.AGENCY;
       } else if (filter.type === FilterOrganizerType.VENUE) {
-        whereClause.role = UserRole.ORGANIZER_VENUE;
+        whereClause.role = UserRole.VENUE;
       }
     }
 
@@ -722,9 +532,9 @@ export class AdminService {
       }),
       this.prisma.user.count({ where: whereClause }),
       this.prisma.user.count({ where: { role: { in: baseRoles } } }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_INDIVIDUAL } }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_AGENCY } }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_VENUE } }),
+      this.prisma.user.count({ where: { role: UserRole.INDIVIDUAL } }),
+      this.prisma.user.count({ where: { role: UserRole.AGENCY } }),
+      this.prisma.user.count({ where: { role: UserRole.VENUE } }),
     ]);
 
     const formattedOrganizers = users.map((user) => {
@@ -732,11 +542,11 @@ export class AdminService {
       let organizerType: 'Individual' | 'Agency' | 'Venue' = 'Individual';
       let planName = 'Essential Event Pass';
 
-      if (user.role === UserRole.ORGANIZER_AGENCY) {
+      if (user.role === UserRole.AGENCY) {
         organizerType = 'Agency';
         displayName = user.agencyProfile?.agencyName || user.fullName;
         planName = 'Pro Subscription';
-      } else if (user.role === UserRole.ORGANIZER_VENUE) {
+      } else if (user.role === UserRole.VENUE) {
         organizerType = 'Venue';
         displayName = user.venueProfile?.propertyName || user.fullName;
         planName = 'Venue Subscription';
@@ -822,11 +632,11 @@ export class AdminService {
     let organizerType: 'Individual' | 'Agency' | 'Venue' = 'Individual';
     let planName = 'Essential Event Pass';
 
-    if (user.role === UserRole.ORGANIZER_AGENCY) {
+    if (user.role === UserRole.AGENCY) {
       organizerType = 'Agency';
       displayName = user.agencyProfile?.agencyName || user.fullName;
       planName = 'Pro Subscription';
-    } else if (user.role === UserRole.ORGANIZER_VENUE) {
+    } else if (user.role === UserRole.VENUE) {
       organizerType = 'Venue';
       displayName = user.venueProfile?.propertyName || user.fullName;
       planName = 'Venue Subscription';
@@ -864,109 +674,138 @@ export class AdminService {
       ? dto.price
       : Number(String(dto.price).replace(/[^0-9.]/g, '')) || 0;
 
-    const newPlan: PlanItem = {
-      id: `plan_${dto.organizerType.toLowerCase()}_${Date.now()}`,
-      planName: dto.planName,
-      price: rawPrice,
-      organizerType: dto.organizerType,
-      billingCycle: dto.billingCycle,
-      features: dto.features && dto.features.length > 0 ? dto.features : ['Core Platform Access'],
-      isArchived: dto.isArchived ?? false,
-      createdAt: new Date().toISOString(),
-    };
+    const created = await this.prisma.plan.create({
+      data: {
+        slug: `plan_${dto.organizerType.toLowerCase()}_${Date.now()}`,
+        planName: dto.planName,
+        description: dto.description?.trim() || null,
+        price: rawPrice,
+        organizerType: this.toPlanOrganizer(dto.organizerType),
+        billingCycle: this.toPlanCycle(dto.billingCycle),
+        features: dto.features && dto.features.length > 0 ? dto.features : ['Core Platform Access'],
+        isArchived: dto.isArchived ?? false,
+      },
+    });
 
-    this.plansStore.unshift(newPlan);
-
-    try {
-      await this.prisma.platformSetting.upsert({
-        where: { key: `PLAN_${newPlan.id}` },
-        update: { value: JSON.stringify(newPlan) },
-        create: {
-          key: `PLAN_${newPlan.id}`,
-          value: JSON.stringify(newPlan),
-          description: `Plan created for ${dto.organizerType}`,
-        },
-      });
-    } catch {}
-
-    return newPlan;
+    return this.toPlanItem(created);
   }
 
   async getPlans(type?: OrganizerType): Promise<PlanItem[]> {
-    if (type) {
-      return this.plansStore.filter(
-        (p) => p.organizerType.toLowerCase() === type.toLowerCase() && !p.isArchived,
-      );
-    }
-    return this.plansStore;
+    const rows = await this.prisma.plan.findMany({
+      where: type
+        ? { organizerType: this.toPlanOrganizer(type), isArchived: false }
+        : undefined,
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => this.toPlanItem(row));
   }
 
   async getPlanById(id: string): Promise<PlanItem> {
-    const plan = this.plansStore.find((p) => p.id === id);
+    const plan = await this.prisma.plan.findFirst({
+      where: { OR: [{ id }, { slug: id }] },
+    });
     if (!plan) {
       throw new NotFoundException(`Plan with ID ${id} not found`);
     }
-    return plan;
+    return this.toPlanItem(plan);
   }
 
   async updatePlan(id: string, dto: UpdatePlanDto): Promise<PlanItem> {
-    const planIndex = this.plansStore.findIndex((p) => p.id === id);
-    if (planIndex === -1) {
+    const existing = await this.prisma.plan.findFirst({
+      where: { OR: [{ id }, { slug: id }] },
+    });
+    if (!existing) {
       throw new NotFoundException(`Plan with ID ${id} not found`);
     }
 
-    const existing = this.plansStore[planIndex];
     let numericPrice = existing.price;
-
     if (dto.price !== undefined) {
       numericPrice = typeof dto.price === 'number'
         ? dto.price
         : Number(String(dto.price).replace(/[^0-9.]/g, '')) || 0;
     }
 
-    const updatedPlan: PlanItem = {
-      ...existing,
-      planName: dto.planName ?? existing.planName,
-      price: numericPrice,
-      organizerType: dto.organizerType ?? existing.organizerType,
-      billingCycle: dto.billingCycle ?? existing.billingCycle,
-      features: dto.features ?? existing.features,
-      isArchived: dto.isArchived ?? existing.isArchived,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = await this.prisma.plan.update({
+      where: { id: existing.id },
+      data: {
+        planName: dto.planName ?? existing.planName,
+        description:
+          dto.description !== undefined ? dto.description.trim() || null : existing.description,
+        price: numericPrice,
+        organizerType: dto.organizerType
+          ? this.toPlanOrganizer(dto.organizerType)
+          : existing.organizerType,
+        billingCycle: dto.billingCycle
+          ? this.toPlanCycle(dto.billingCycle)
+          : existing.billingCycle,
+        features: dto.features ?? existing.features,
+        isArchived: dto.isArchived ?? existing.isArchived,
+      },
+    });
 
-    this.plansStore[planIndex] = updatedPlan;
-
-    try {
-      await this.prisma.platformSetting.upsert({
-        where: { key: `PLAN_${updatedPlan.id}` },
-        update: { value: JSON.stringify(updatedPlan) },
-        create: {
-          key: `PLAN_${updatedPlan.id}`,
-          value: JSON.stringify(updatedPlan),
-          description: `Plan updated for ${updatedPlan.organizerType}`,
-        },
-      });
-    } catch {}
-
-    return updatedPlan;
+    return this.toPlanItem(updated);
   }
 
   async deletePlan(id: string): Promise<{ deleted: boolean; id: string }> {
-    const planIndex = this.plansStore.findIndex((p) => p.id === id);
-    if (planIndex === -1) {
+    const existing = await this.prisma.plan.findFirst({
+      where: { OR: [{ id }, { slug: id }] },
+    });
+    if (!existing) {
       throw new NotFoundException(`Plan with ID ${id} not found`);
     }
 
-    this.plansStore.splice(planIndex, 1);
+    await this.prisma.plan.delete({ where: { id: existing.id } });
+    return { deleted: true, id: existing.id };
+  }
 
-    try {
-      await this.prisma.platformSetting.delete({
-        where: { key: `PLAN_${id}` },
-      });
-    } catch {}
+  private toPlanOrganizer(type: OrganizerType): PlanOrganizerType {
+    if (type === OrganizerType.AGENCY) return PlanOrganizerType.AGENCY;
+    if (type === OrganizerType.VENUE) return PlanOrganizerType.VENUE;
+    return PlanOrganizerType.INDIVIDUAL;
+  }
 
-    return { deleted: true, id };
+  private toPlanCycle(cycle: BillingCycle): PlanBillingCycle {
+    if (cycle === BillingCycle.MONTHLY) return PlanBillingCycle.MONTHLY;
+    if (cycle === BillingCycle.ANNUAL) return PlanBillingCycle.ANNUAL;
+    return PlanBillingCycle.PER_EVENT;
+  }
+
+  private toPlanItem(row: {
+    id: string;
+    slug: string;
+    planName: string;
+    description: string | null;
+    price: number;
+    organizerType: PlanOrganizerType;
+    billingCycle: PlanBillingCycle;
+    features: string[];
+    isArchived: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }): PlanItem {
+    return {
+      id: row.id,
+      slug: row.slug,
+      planName: row.planName,
+      description: row.description,
+      price: row.price,
+      organizerType:
+        row.organizerType === PlanOrganizerType.AGENCY
+          ? OrganizerType.AGENCY
+          : row.organizerType === PlanOrganizerType.VENUE
+            ? OrganizerType.VENUE
+            : OrganizerType.INDIVIDUAL,
+      billingCycle:
+        row.billingCycle === PlanBillingCycle.MONTHLY
+          ? BillingCycle.MONTHLY
+          : row.billingCycle === PlanBillingCycle.ANNUAL
+            ? BillingCycle.ANNUAL
+            : BillingCycle.PER_EVENT,
+      features: row.features,
+      isArchived: row.isArchived,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
   }
 
   /**
@@ -1007,8 +846,8 @@ export class AdminService {
           createdAt: { gte: lastMonthStart, lte: lastMonthEnd },
         },
       }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_AGENCY } }),
-      this.prisma.user.count({ where: { role: UserRole.ORGANIZER_VENUE } }),
+      this.prisma.user.count({ where: { role: UserRole.AGENCY } }),
+      this.prisma.user.count({ where: { role: UserRole.VENUE } }),
     ]);
 
     const totalRevenue = totalRevenueAgg._sum.totalAmount || 0;
@@ -1022,7 +861,7 @@ export class AdminService {
       momGrowthPercentage = 100;
     }
 
-    const availablePlansCount = this.plansStore.filter((p) => !p.isArchived).length;
+    const availablePlansCount = await this.prisma.plan.count({ where: { isArchived: false } });
     const activeSubscriptions = agencyCount + venueCount;
 
     return {
@@ -1146,10 +985,10 @@ export class AdminService {
       const organizer = o.event?.organizer || o.buyer;
       let orgName = organizer?.fullName || o.buyerName || 'Organizer';
 
-      if (organizer?.role === UserRole.ORGANIZER_AGENCY) {
+      if (organizer?.role === UserRole.AGENCY) {
         orgType = 'Agency';
         orgName = organizer.agencyProfile?.agencyName || organizer.fullName;
-      } else if (organizer?.role === UserRole.ORGANIZER_VENUE) {
+      } else if (organizer?.role === UserRole.VENUE) {
         orgType = 'Venue';
         orgName = organizer.venueProfile?.propertyName || organizer.fullName;
       }
@@ -1495,9 +1334,9 @@ export class AdminService {
         where: {
           role: {
             in: [
-              UserRole.ORGANIZER_INDIVIDUAL,
-              UserRole.ORGANIZER_AGENCY,
-              UserRole.ORGANIZER_VENUE,
+              UserRole.INDIVIDUAL,
+              UserRole.AGENCY,
+              UserRole.VENUE,
             ],
           },
           createdAt: { gte: startOfMonth },
@@ -1563,9 +1402,9 @@ export class AdminService {
       where: {
         role: {
           in: [
-            UserRole.ORGANIZER_INDIVIDUAL,
-            UserRole.ORGANIZER_AGENCY,
-            UserRole.ORGANIZER_VENUE,
+            UserRole.INDIVIDUAL,
+            UserRole.AGENCY,
+            UserRole.VENUE,
           ],
         },
         createdAt: { gte: startDate },
@@ -1588,9 +1427,9 @@ export class AdminService {
         return uDate.getFullYear() === mYear && uDate.getMonth() === mIndex;
       });
 
-      const ind = monthUsers.filter((u) => u.role === UserRole.ORGANIZER_INDIVIDUAL).length;
-      const agency = monthUsers.filter((u) => u.role === UserRole.ORGANIZER_AGENCY).length;
-      const venue = monthUsers.filter((u) => u.role === UserRole.ORGANIZER_VENUE).length;
+      const ind = monthUsers.filter((u) => u.role === UserRole.INDIVIDUAL).length;
+      const agency = monthUsers.filter((u) => u.role === UserRole.AGENCY).length;
+      const venue = monthUsers.filter((u) => u.role === UserRole.VENUE).length;
 
       series.push({
         month: mName,

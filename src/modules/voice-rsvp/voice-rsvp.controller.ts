@@ -17,7 +17,7 @@ import { VoiceRsvpService } from './voice-rsvp.service';
 import { TranscribeVoiceDto } from './dto/transcribe-voice.dto';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Voice RSVP & AI Speech')
+@ApiTags('06 Guest / RSVP & Pass')
 @Controller('voice-rsvp')
 export class VoiceRsvpController {
   constructor(@Inject(VoiceRsvpService) private readonly voiceRsvpService: VoiceRsvpService) {}

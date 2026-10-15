@@ -9,14 +9,18 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUserDto } from '../../common/dto/current-user.dto';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Events')
+@ApiTags('07 Shared Organizer / Events')
 @Controller('events')
 export class EventsController {
   constructor(@Inject(EventsService) private readonly eventsService: EventsService) {}
 
   @Get()
+  @ApiTags('00 Public / Catalog & Checkout')
   @ResponseMessage('Events retrieved successfully')
-  @ApiOperation({ summary: 'List published and upcoming events with filters' })
+  @ApiOperation({
+    summary: 'List published and upcoming events with filters',
+    description: '**Roles:** PUBLIC · GUEST',
+  })
   @ApiQuery({ name: 'status', required: false, enum: EventStatus, description: 'Filter by event status' })
   @ApiQuery({ name: 'category', required: false, type: String, description: 'Filter by event category' })
   @ApiQuery({ name: 'organizerId', required: false, type: String, description: 'Filter by organizer UUID' })
@@ -26,8 +30,12 @@ export class EventsController {
   }
 
   @Get(':id')
+  @ApiTags('00 Public / Catalog & Checkout')
   @ResponseMessage('Event details retrieved successfully')
-  @ApiOperation({ summary: 'Retrieve comprehensive event details, ticket tiers, and schedules' })
+  @ApiOperation({
+    summary: 'Retrieve comprehensive event details, ticket tiers, and schedules',
+    description: '**Roles:** PUBLIC · GUEST',
+  })
   @ApiParam({
     name: 'id',
     type: String,

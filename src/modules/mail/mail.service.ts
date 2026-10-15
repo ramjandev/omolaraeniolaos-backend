@@ -114,4 +114,47 @@ export class MailService {
 
     return true;
   }
+
+  async sendEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; error?: string }> {
+    const apiKey = this.getApiKey();
+    const fromEmail = this.getFromEmail();
+
+    if (!apiKey || apiKey.startsWith('re_xxxx') || apiKey.startsWith('re_1234')) {
+      this.logger.log(`[sandbox] Email queued for ${to}: ${subject}`);
+      return { ok: false, error: 'Email provider is not configured' };
+    }
+
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ from: fromEmail, to: [to], subject, html }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        const error = this.readProviderError(errorText);
+        this.logger.warn(`Resend dispatch failed: ${error}`);
+        return { ok: false, error };
+      }
+
+      return { ok: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown mail error';
+      this.logger.error(`Error sending email via Resend: ${message}`);
+      return { ok: false, error: message };
+    }
+  }
+
+  private readProviderError(raw: string) {
+    try {
+      const parsed = JSON.parse(raw) as { message?: string; error?: { message?: string } };
+      return String(parsed?.error?.message || parsed?.message || raw).slice(0, 240);
+    } catch {
+      return raw.slice(0, 240);
+    }
+  }
 }

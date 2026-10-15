@@ -5,7 +5,7 @@ import { CreateTierDto } from './dto/create-tier.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Tickets & Pricing')
+@ApiTags('07 Shared Organizer / Tickets')
 @Controller('tickets')
 export class TicketsController {
   constructor(@Inject(TicketsService) private readonly ticketsService: TicketsService) {}

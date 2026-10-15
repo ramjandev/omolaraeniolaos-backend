@@ -13,6 +13,7 @@ import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { PaymentConfigDto } from './dto/payment-config.dto';
+import { AuthService } from '../auth/auth.service';
 
 @Injectable()
 export class PaymentsService {
@@ -27,6 +28,7 @@ export class PaymentsService {
   constructor(
     @Inject(PrismaService) private prisma: PrismaService,
     @Optional() @Inject(ConfigService) private configService?: ConfigService,
+    @Optional() @Inject(AuthService) private authService?: AuthService,
   ) {
     this.secretKey =
       this.configService?.get<string>('FLUTTERWAVE_SECRET_KEY') ||
@@ -297,6 +299,10 @@ export class PaymentsService {
 
     if (event?.event === 'charge.completed' && event?.data?.status === 'successful') {
       const txRef = event.data.tx_ref;
+      const metaType = event.data.meta?.type;
+      if (metaType === 'ORGANIZER_PLAN_SUBSCRIPTION' && event.data.meta?.userId) {
+        await this.authService?.reconcilePlanPayments(event.data.meta.userId);
+      }
       const orderId = event.data.meta?.orderId;
 
       const order = await this.prisma.order.findFirst({

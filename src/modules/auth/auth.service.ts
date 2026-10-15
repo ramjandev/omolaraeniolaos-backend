@@ -3,6 +3,7 @@ import {
   ConflictException,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
   Inject,
   Optional,
   Logger,
@@ -24,78 +25,13 @@ import { RegisterOrganizerAgencyDto } from './dto/register-organizer-agency.dto'
 import { RegisterOrganizerVenueDto } from './dto/register-organizer-venue.dto';
 import { PayPlanDto } from './dto/pay-plan.dto';
 
-const DEFAULT_PLANS: Record<string, { id: string; name: string; price: number; cycle: string; organizerType: string }> = {
-  plan_ind_1: {
-    id: 'plan_ind_1',
-    name: 'Essential Event Pass',
-    price: 0,
-    cycle: 'Per-event',
-    organizerType: 'Individual',
-  },
-  plan_ind_2: {
-    id: 'plan_ind_2',
-    name: 'Grand Celebration Pass',
-    price: 35000,
-    cycle: 'Per-event',
-    organizerType: 'Individual',
-  },
-  plan_agency_solo: {
-    id: 'plan_agency_solo',
-    name: 'Solo Planner',
-    price: 0,
-    cycle: 'Monthly',
-    organizerType: 'Agency',
-  },
-  plan_agency_pro: {
-    id: 'plan_agency_pro',
-    name: 'Agency Pro',
-    price: 120000,
-    cycle: 'Monthly',
-    organizerType: 'Agency',
-  },
-  plan_agency_1: {
-    id: 'plan_agency_1',
-    name: 'Agency Pro',
-    price: 120000,
-    cycle: 'Monthly',
-    organizerType: 'Agency',
-  },
-  plan_agency_enterprise: {
-    id: 'plan_agency_enterprise',
-    name: 'Enterprise Pass',
-    price: 350000,
-    cycle: 'Monthly',
-    organizerType: 'Agency',
-  },
-  plan_venue_starter: {
-    id: 'plan_venue_starter',
-    name: 'Venue Starter',
-    price: 0,
-    cycle: 'Monthly',
-    organizerType: 'Venue',
-  },
-  plan_venue_pro: {
-    id: 'plan_venue_pro',
-    name: 'Venue Pro',
-    price: 150000,
-    cycle: 'Monthly',
-    organizerType: 'Venue',
-  },
-  plan_venue_1: {
-    id: 'plan_venue_1',
-    name: 'Venue Enterprise Pass',
-    price: 250000,
-    cycle: 'Monthly',
-    organizerType: 'Venue',
-  },
-  plan_venue_enterprise: {
-    id: 'plan_venue_enterprise',
-    name: 'Venue Enterprise Pass',
-    price: 350000,
-    cycle: 'Monthly',
-    organizerType: 'Venue',
-  },
-};
+export interface ResolvedPlan {
+  id: string;
+  name: string;
+  price: number;
+  cycle: string;
+  organizerType: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -187,22 +123,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    let isMatch = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!isMatch && (dto.password === 'SecurePassword123!' || dto.password === 'Password123!')) {
-      const isDemoAccount = [
-        'admin@mceniesvite.com',
-        'individual@mceniesvite.com',
-        'organizer@mceniesvite.com',
-        'agency@mceniesvite.com',
-        'venue@mceniesvite.com',
-        'gatestaff@mceniesvite.com',
-        'gate@mceniesvite.com',
-        'guest@mceniesvite.com',
-      ].includes(email);
-      if (isDemoAccount) {
-        isMatch = true;
-      }
-    }
+    const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
     if (!isMatch) {
       throw new UnauthorizedException('Invalid email or password');
     }
@@ -330,7 +251,34 @@ export class AuthService {
     }
 
     const { passwordHash, ...safeUser } = user;
-    return safeUser;
+    const planSetting = await this.prisma.platformSetting.findUnique({
+      where: { key: `PLAN_USER_${userId}` },
+    });
+    let plan: {
+      planId: string | null;
+      planName: string | null;
+      isPaid: boolean;
+      status: string | null;
+    } | null = null;
+    if (planSetting?.value) {
+      try {
+        const parsed = JSON.parse(planSetting.value) as {
+          planId?: string;
+          planName?: string;
+          isPaid?: boolean;
+          status?: string;
+        };
+        plan = {
+          planId: parsed.planId ?? null,
+          planName: parsed.planName ?? null,
+          isPaid: parsed.isPaid === true || parsed.status === 'ACTIVE',
+          status: parsed.status ?? null,
+        };
+      } catch {
+        plan = null;
+      }
+    }
+    return { ...safeUser, plan };
   }
 
   private async generateTokens(
@@ -357,32 +305,274 @@ export class AuthService {
     };
   }
 
-  async resolvePlan(planId: string) {
-    try {
-      const setting = await this.prisma.platformSetting.findUnique({
-        where: { key: `PLAN_${planId}` },
-      });
-      if (setting) {
-        const parsed = JSON.parse(setting.value);
-        return {
-          id: parsed.id,
-          name: parsed.planName,
-          price: Number(parsed.price) || 0,
-          cycle: parsed.billingCycle,
-          organizerType: parsed.organizerType,
-        };
-      }
-    } catch {}
+  /** Looks up an active plan by cuid or slug. Returns null when no such plan exists. */
+  async resolvePlan(planId?: string): Promise<ResolvedPlan | null> {
+    if (!planId) return null;
+    const plan = await this.prisma.plan.findFirst({
+      where: { OR: [{ id: planId }, { slug: planId }], isArchived: false },
+    });
+    if (!plan) return null;
+    return {
+      id: plan.id,
+      name: plan.planName,
+      price: plan.price,
+      cycle: plan.billingCycle,
+      organizerType: plan.organizerType,
+    };
+  }
 
-    return (
-      DEFAULT_PLANS[planId] || {
-        id: planId,
-        name: 'Standard Event Pass',
-        price: 0,
-        cycle: 'Per-event',
-        organizerType: 'Individual',
+  /** Annual billing charges 12 months at a 20% discount. */
+  private applyBillingCycle(plan: ResolvedPlan | null, billingCycle?: string): ResolvedPlan | null {
+    if (!plan) return null;
+    const isAnnual = billingCycle?.toLowerCase() === 'annual';
+    return {
+      ...plan,
+      price: isAnnual && plan.price > 0 ? Math.round(plan.price * 12 * 0.8) : plan.price,
+      cycle: isAnnual ? 'ANNUAL' : plan.cycle,
+    };
+  }
+
+  /** Appends a plan charge so the individual billing page can list past invoices. */
+  private async recordBillingHistory(
+    userId: string,
+    entry: {
+      planId: string;
+      description: string;
+      amount: number;
+      status: 'Paid' | 'Pending' | 'Failed';
+      paymentMethod?: string;
+      txRef?: string;
+    },
+  ) {
+    const key = `BILLING_HISTORY_${userId}`;
+    const existing = await this.prisma.platformSetting.findUnique({ where: { key } });
+    let history: Array<Record<string, unknown>> = [];
+    if (existing?.value) {
+      try {
+        const parsed = JSON.parse(existing.value);
+        if (Array.isArray(parsed)) history = parsed;
+      } catch {
+        history = [];
       }
-    );
+    }
+
+    const now = new Date();
+    history.unshift({
+      id: `bill_${now.getTime()}`,
+      date: now.toISOString(),
+      description: entry.description,
+      amount: entry.amount,
+      currency: 'NGN',
+      status: entry.status,
+      invoiceNumber: `INV-${now.getFullYear()}-${String(now.getTime()).slice(-6)}`,
+      paymentMethod: entry.paymentMethod || 'CARD',
+      planId: entry.planId,
+      txRef: entry.txRef || null,
+    });
+
+    const value = JSON.stringify(history.slice(0, 50));
+    await this.prisma.platformSetting.upsert({
+      where: { key },
+      update: { value },
+      create: {
+        key,
+        value,
+        description: `Billing history for user ${userId}`,
+      },
+    });
+  }
+
+  /**
+   * Flutterwave confirms the charge. No admin review is required.
+   * Pending invoices that match a successful transaction become Paid.
+   */
+  async reconcilePlanPayments(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) return;
+
+    const key = `BILLING_HISTORY_${userId}`;
+    const existing = await this.prisma.platformSetting.findUnique({ where: { key } });
+    let history: Array<Record<string, unknown>> = [];
+    if (existing?.value) {
+      try {
+        const parsed = JSON.parse(existing.value);
+        if (Array.isArray(parsed)) history = parsed;
+      } catch {
+        history = [];
+      }
+    }
+    if (!history.some((item) => item.status === 'Pending')) return;
+
+    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+    if (!secretKey) return;
+
+    let transactions: Array<Record<string, unknown>> = [];
+    try {
+      const url = 'https://api.flutterwave.com/v3/transactions?status=successful';
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${secretKey}` },
+      });
+      const body = (await res.json()) as { data?: Array<Record<string, unknown>> };
+      if (res.ok && Array.isArray(body.data)) transactions = body.data;
+    } catch (err: any) {
+      this.logger.error(`Could not confirm Flutterwave plan payments: ${err.message}`);
+      return;
+    }
+
+    const prefix = `SUB-${userId.slice(0, 8)}-`;
+    const matches = transactions.filter((tx) => {
+      if (String(tx.status || '').toLowerCase() !== 'successful') return false;
+      const meta = this.readChargeMeta(tx.meta);
+      const txRef = typeof tx.tx_ref === 'string' ? tx.tx_ref : '';
+      return (
+        meta.type === 'ORGANIZER_PLAN_SUBSCRIPTION' ||
+        meta.userId === userId ||
+        txRef.startsWith(prefix)
+      );
+    });
+
+    const used = new Set<number>();
+    let latest: { planId: string; amount: number } | null = null;
+    for (const tx of matches) {
+      const meta = this.readChargeMeta(tx.meta);
+      const txRef = typeof tx.tx_ref === 'string' ? tx.tx_ref : '';
+      const amount = typeof tx.amount === 'number' ? tx.amount : Number(tx.amount);
+      let index = history.findIndex(
+        (item, itemIndex) => !used.has(itemIndex) && txRef && item.txRef === txRef,
+      );
+      if (index < 0) {
+        index = history.findIndex((item, itemIndex) => {
+          if (used.has(itemIndex) || item.status !== 'Pending') return false;
+          const samePlan = meta.planId && item.planId === meta.planId;
+          const sameAmount = Number(item.amount) === amount;
+          return samePlan || sameAmount;
+        });
+      }
+      if (index < 0) continue;
+      used.add(index);
+      history[index] = {
+        ...history[index],
+        status: 'Paid',
+        txRef: txRef || history[index].txRef || null,
+        paidAt: typeof tx.created_at === 'string' ? tx.created_at : new Date().toISOString(),
+      };
+      const planId = meta.planId || (typeof history[index].planId === 'string' ? history[index].planId : '');
+      if (planId) latest = { planId, amount: Number.isFinite(amount) ? amount : Number(history[index].amount) };
+    }
+
+    if (used.size === 0) return;
+
+    await this.prisma.platformSetting.update({
+      where: { key },
+      data: { value: JSON.stringify(history) },
+    });
+
+    if (latest?.planId) {
+      await this.activatePaidPlan(userId, latest.planId, latest.amount);
+    }
+  }
+
+  private readChargeMeta(meta: unknown): { userId?: string; planId?: string; type?: string } {
+    if (!meta) return {};
+    if (typeof meta === 'string') {
+      try {
+        return this.readChargeMeta(JSON.parse(meta));
+      } catch {
+        return {};
+      }
+    }
+    if (typeof meta !== 'object') return {};
+    const row = meta as { userId?: string; planId?: string; type?: string };
+    return { userId: row.userId, planId: row.planId, type: row.type };
+  }
+
+  private async activatePaidPlan(userId: string, planId: string, amount: number) {
+    const plan = await this.resolvePlan(planId);
+    const value = JSON.stringify({
+      planId: plan?.id ?? planId,
+      planName: plan?.name ?? null,
+      price: amount,
+      cycle: plan?.cycle ?? null,
+      isPaid: true,
+      status: 'ACTIVE',
+      paymentMethod: 'CARD',
+      selectedAt: new Date().toISOString(),
+    });
+    await this.prisma.platformSetting.upsert({
+      where: { key: `PLAN_USER_${userId}` },
+      update: { value },
+      create: {
+        key: `PLAN_USER_${userId}`,
+        value,
+        description: `Plan assigned to user ${userId}`,
+      },
+    });
+  }
+
+  /** Stores the plan chosen at signup and starts checkout when payment is due. */
+  private async assignRegistrationPlan(
+    user: { id: string; email: string; fullName: string; phone?: string | null },
+    plan: ResolvedPlan | null,
+    options: { skipPayment?: boolean; paymentMethod?: string; label: string },
+  ) {
+    if (!plan) {
+      return { selectedPlan: null, checkoutResult: null };
+    }
+
+    const isFree = plan.price === 0;
+    const isSkipped = options.skipPayment === true;
+    const checkoutResult =
+      !isFree && !isSkipped ? await this.generatePlanCheckoutUrl(user, plan) : null;
+
+    const planStatus = isFree
+      ? 'ACTIVE'
+      : isSkipped
+        ? 'PAYMENT_PENDING'
+        : 'CHECKOUT_INITIALIZED';
+
+    const value = JSON.stringify({
+      planId: plan.id,
+      planName: plan.name,
+      price: plan.price,
+      cycle: plan.cycle,
+      isPaid: isFree,
+      status: planStatus,
+      paymentMethod: options.paymentMethod || (isFree ? 'FREE' : 'CARD'),
+      selectedAt: new Date().toISOString(),
+    });
+
+    await this.prisma.platformSetting.upsert({
+      where: { key: `PLAN_USER_${user.id}` },
+      update: { value },
+      create: {
+        key: `PLAN_USER_${user.id}`,
+        value,
+        description: `Plan assigned to ${options.label} user ${user.id}`,
+      },
+    });
+
+    await this.recordBillingHistory(user.id, {
+      planId: plan.id,
+      description: plan.name,
+      amount: plan.price,
+      status: isFree ? 'Paid' : 'Pending',
+      paymentMethod: options.paymentMethod || (isFree ? 'FREE' : 'CARD'),
+    });
+
+    return {
+      selectedPlan: {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        cycle: plan.cycle,
+        isPaid: isFree,
+        status: planStatus,
+      },
+      checkoutResult,
+    };
   }
 
   async generatePlanCheckoutUrl(
@@ -457,8 +647,7 @@ export class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
-    const planId = dto.planId || 'plan_ind_1';
-    const plan = await this.resolvePlan(planId);
+    const plan = await this.resolvePlan(dto.planId);
 
     // Parse event date, start time, and optional end time
     const baseDate = new Date(dto.eventDate);
@@ -512,7 +701,7 @@ export class AuthService {
         passwordHash,
         fullName: dto.fullName,
         phone: dto.phone,
-        role: UserRole.ORGANIZER_INDIVIDUAL,
+        role: UserRole.INDIVIDUAL,
         profile: {
           create: {
             bio: `Organizer of ${dto.eventName}`,
@@ -558,48 +747,10 @@ export class AuthService {
     });
 
     const createdEvent = user.eventsCreated[0];
-    const isFree = plan.price === 0;
-    const isSkipped = dto.skipPayment === true;
-    let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
-
-    if (!isFree && !isSkipped) {
-      checkoutResult = await this.generatePlanCheckoutUrl(user, plan);
-    }
-
-    const planStatus = isFree
-      ? 'ACTIVE'
-      : isSkipped
-        ? 'PAYMENT_PENDING'
-        : 'CHECKOUT_INITIALIZED';
-
-    await this.prisma.platformSetting.upsert({
-      where: { key: `PLAN_USER_${user.id}` },
-      update: {
-        value: JSON.stringify({
-          planId: plan.id,
-          planName: plan.name,
-          price: plan.price,
-          cycle: plan.cycle,
-          isPaid: isFree,
-          status: planStatus,
-          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
-          selectedAt: new Date().toISOString(),
-        }),
-      },
-      create: {
-        key: `PLAN_USER_${user.id}`,
-        value: JSON.stringify({
-          planId: plan.id,
-          planName: plan.name,
-          price: plan.price,
-          cycle: plan.cycle,
-          isPaid: isFree,
-          status: planStatus,
-          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
-          selectedAt: new Date().toISOString(),
-        }),
-        description: `Plan assigned to individual user ${user.id}`,
-      },
+    const { selectedPlan, checkoutResult } = await this.assignRegistrationPlan(user, plan, {
+      skipPayment: dto.skipPayment,
+      paymentMethod: dto.paymentMethod,
+      label: 'individual',
     });
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
@@ -624,14 +775,7 @@ export class AuthService {
         capacity: createdEvent.capacity,
         status: createdEvent.status,
       },
-      selectedPlan: {
-        id: plan.id,
-        name: plan.name,
-        price: plan.price,
-        cycle: plan.cycle,
-        isPaid: isFree,
-        status: planStatus,
-      },
+      selectedPlan,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       checkoutUrl: checkoutResult?.checkoutUrl || null,
@@ -657,20 +801,10 @@ export class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
-    const planId = dto.planId || 'plan_agency_pro';
-    const plan = await this.resolvePlan(planId);
-
-    // Apply 20% annual discount if annual billing cycle chosen
-    const isAnnual = dto.billingCycle?.toLowerCase() === 'annual';
-    const planPrice = isAnnual && plan.price > 0
-      ? Math.round(plan.price * 12 * 0.8)
-      : plan.price;
-
-    const planToCharge = {
-      ...plan,
-      price: planPrice,
-      cycle: isAnnual ? 'Annual' : 'Monthly',
-    };
+    const planToCharge = this.applyBillingCycle(
+      await this.resolvePlan(dto.planId),
+      dto.billingCycle,
+    );
 
     const headquarters = [dto.city, dto.country || 'Nigeria']
       .filter(Boolean)
@@ -683,7 +817,7 @@ export class AuthService {
         passwordHash,
         fullName: dto.fullName,
         phone: dto.phone,
-        role: UserRole.ORGANIZER_AGENCY,
+        role: UserRole.AGENCY,
         agencyProfile: {
           create: {
             agencyName: dto.agencyName,
@@ -759,48 +893,10 @@ export class AuthService {
       });
     }
 
-    const isFree = planToCharge.price === 0;
-    const isSkipped = dto.skipPayment === true;
-    let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
-
-    if (!isFree && !isSkipped) {
-      checkoutResult = await this.generatePlanCheckoutUrl(user, planToCharge);
-    }
-
-    const planStatus = isFree
-      ? 'ACTIVE'
-      : isSkipped
-        ? 'PAYMENT_PENDING'
-        : 'CHECKOUT_INITIALIZED';
-
-    await this.prisma.platformSetting.upsert({
-      where: { key: `PLAN_USER_${user.id}` },
-      update: {
-        value: JSON.stringify({
-          planId: plan.id,
-          planName: plan.name,
-          price: planToCharge.price,
-          cycle: planToCharge.cycle,
-          isPaid: isFree,
-          status: planStatus,
-          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
-          selectedAt: new Date().toISOString(),
-        }),
-      },
-      create: {
-        key: `PLAN_USER_${user.id}`,
-        value: JSON.stringify({
-          planId: plan.id,
-          planName: plan.name,
-          price: planToCharge.price,
-          cycle: planToCharge.cycle,
-          isPaid: isFree,
-          status: planStatus,
-          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
-          selectedAt: new Date().toISOString(),
-        }),
-        description: `Plan assigned to agency user ${user.id}`,
-      },
+    const { selectedPlan, checkoutResult } = await this.assignRegistrationPlan(user, planToCharge, {
+      skipPayment: dto.skipPayment,
+      paymentMethod: dto.paymentMethod,
+      label: 'agency',
     });
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
@@ -827,14 +923,7 @@ export class AuthService {
         teamSize: dto.teamSize || null,
         invitedMembers: dto.invitedMembers || [],
       },
-      selectedPlan: {
-        id: plan.id,
-        name: plan.name,
-        price: planToCharge.price,
-        cycle: planToCharge.cycle,
-        isPaid: isFree,
-        status: planStatus,
-      },
+      selectedPlan,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       checkoutUrl: checkoutResult?.checkoutUrl || null,
@@ -860,20 +949,10 @@ export class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
-    const planId = dto.planId || 'plan_venue_1';
-    const plan = await this.resolvePlan(planId);
-
-    // Apply 20% annual discount if annual billing cycle chosen
-    const isAnnual = dto.billingCycle?.toLowerCase() === 'annual';
-    const planPrice = isAnnual && plan.price > 0
-      ? Math.round(plan.price * 12 * 0.8)
-      : plan.price;
-
-    const planToCharge = {
-      ...plan,
-      price: planPrice,
-      cycle: isAnnual ? 'Annual' : 'Monthly',
-    };
+    const planToCharge = this.applyBillingCycle(
+      await this.resolvePlan(dto.planId),
+      dto.billingCycle,
+    );
 
     const mapSpaceType = (t?: string): SpaceType => {
       if (!t) return SpaceType.BALLROOM;
@@ -924,7 +1003,7 @@ export class AuthService {
         passwordHash,
         fullName: dto.fullName,
         phone: dto.phone,
-        role: UserRole.ORGANIZER_VENUE,
+        role: UserRole.VENUE,
         venueProfile: {
           create: {
             propertyName: dto.businessName,
@@ -1011,48 +1090,10 @@ export class AuthService {
       });
     }
 
-    const isFree = planToCharge.price === 0;
-    const isSkipped = dto.skipPayment === true;
-    let checkoutResult: { checkoutUrl: string; txRef: string } | null = null;
-
-    if (!isFree && !isSkipped) {
-      checkoutResult = await this.generatePlanCheckoutUrl(user, planToCharge);
-    }
-
-    const planStatus = isFree
-      ? 'ACTIVE'
-      : isSkipped
-        ? 'PAYMENT_PENDING'
-        : 'CHECKOUT_INITIALIZED';
-
-    await this.prisma.platformSetting.upsert({
-      where: { key: `PLAN_USER_${user.id}` },
-      update: {
-        value: JSON.stringify({
-          planId: plan.id,
-          planName: plan.name,
-          price: planToCharge.price,
-          cycle: planToCharge.cycle,
-          isPaid: isFree,
-          status: planStatus,
-          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
-          selectedAt: new Date().toISOString(),
-        }),
-      },
-      create: {
-        key: `PLAN_USER_${user.id}`,
-        value: JSON.stringify({
-          planId: plan.id,
-          planName: plan.name,
-          price: planToCharge.price,
-          cycle: planToCharge.cycle,
-          isPaid: isFree,
-          status: planStatus,
-          paymentMethod: dto.paymentMethod || (isFree ? 'FREE' : 'CARD'),
-          selectedAt: new Date().toISOString(),
-        }),
-        description: `Plan assigned to venue user ${user.id}`,
-      },
+    const { selectedPlan, checkoutResult } = await this.assignRegistrationPlan(user, planToCharge, {
+      skipPayment: dto.skipPayment,
+      paymentMethod: dto.paymentMethod,
+      label: 'venue',
     });
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
@@ -1086,14 +1127,7 @@ export class AuthService {
         spaces: venueProfile.spaces,
         invitedMembers: dto.invitedMembers || [],
       },
-      selectedPlan: {
-        id: plan.id,
-        name: plan.name,
-        price: planToCharge.price,
-        cycle: planToCharge.cycle,
-        isPaid: isFree,
-        status: planStatus,
-      },
+      selectedPlan,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       checkoutUrl: checkoutResult?.checkoutUrl || null,
@@ -1114,6 +1148,9 @@ export class AuthService {
     }
 
     const plan = await this.resolvePlan(dto.planId);
+    if (!plan) {
+      throw new NotFoundException(`Plan "${dto.planId}" was not found`);
+    }
 
     if (plan.price === 0) {
       await this.prisma.platformSetting.upsert({
@@ -1144,6 +1181,14 @@ export class AuthService {
         },
       });
 
+      await this.recordBillingHistory(user.id, {
+        planId: plan.id,
+        description: plan.name,
+        amount: 0,
+        status: 'Paid',
+        paymentMethod: 'FREE',
+      });
+
       return {
         isFreePlan: true,
         plan,
@@ -1157,6 +1202,15 @@ export class AuthService {
     if (!checkout) {
       throw new BadRequestException('Could not generate Flutterwave payment link. Check gateway keys.');
     }
+
+    await this.recordBillingHistory(user.id, {
+      planId: plan.id,
+      description: plan.name,
+      amount: plan.price,
+      status: 'Pending',
+      paymentMethod: 'CARD',
+      txRef: checkout.txRef,
+    });
 
     return {
       isFreePlan: false,

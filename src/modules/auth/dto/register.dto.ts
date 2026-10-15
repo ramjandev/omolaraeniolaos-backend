@@ -24,7 +24,7 @@ export class RegisterDto {
 
   @ApiProperty({
     enum: UserRole,
-    example: UserRole.ORGANIZER_INDIVIDUAL,
+    example: UserRole.INDIVIDUAL,
     description: 'Initial role in platform',
   })
   @IsEnum(UserRole)

@@ -17,7 +17,7 @@ export class IndividualUserDto {
   @ApiPropertyOptional({ example: null })
   avatarUrl?: string | null;
 
-  @ApiProperty({ enum: UserRole, example: UserRole.ORGANIZER_INDIVIDUAL })
+  @ApiProperty({ enum: UserRole, example: UserRole.INDIVIDUAL })
   role: UserRole;
 
   @ApiProperty({ enum: UserStatus, example: UserStatus.ACTIVE })

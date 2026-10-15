@@ -6,8 +6,21 @@ import { CreateClientDto } from './dto/create-client.dto';
 export class AgencyService {
   constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
-  async getClients() {
+  async getClients(userId?: string, role?: string) {
+    if (role !== 'ADMIN' && userId) {
+      const agency = await this.prisma.agencyProfile.findFirst({ where: { userId } });
+      if (!agency) return [];
+      return this.prisma.agencyClient.findMany({
+        where: { agencyId: agency.id },
+        include: {
+          events: { select: { id: true, title: true, status: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
     return this.prisma.agencyClient.findMany({
+      where: undefined,
       include: {
         events: { select: { id: true, title: true, status: true } },
       },
@@ -39,8 +52,22 @@ export class AgencyService {
     });
   }
 
-  async getInvoices() {
+  async getInvoices(userId?: string, role?: string) {
+    if (role !== 'ADMIN' && userId) {
+      const agency = await this.prisma.agencyProfile.findFirst({ where: { userId } });
+      if (!agency) return [];
+      return this.prisma.agencyInvoice.findMany({
+        where: { agencyId: agency.id },
+        include: {
+          client: { select: { name: true, contactEmail: true } },
+          event: { select: { title: true } },
+        },
+        orderBy: { issueDate: 'desc' },
+      });
+    }
+
     return this.prisma.agencyInvoice.findMany({
+      where: undefined,
       include: {
         client: { select: { name: true, contactEmail: true } },
         event: { select: { title: true } },

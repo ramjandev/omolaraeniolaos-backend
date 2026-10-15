@@ -21,7 +21,7 @@ import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { PaymentConfigDto } from './dto/payment-config.dto';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Payments & Flutterwave')
+@ApiTags('00 Public / Payments')
 @Controller('payments')
 export class PaymentsController {
   constructor(@Inject(PaymentsService) private readonly paymentsService: PaymentsService) {}

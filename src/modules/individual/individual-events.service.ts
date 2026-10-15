@@ -7,11 +7,13 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
-  UserRole,
   EventStatus,
   EventFormat,
   AttendeeStatus,
   TicketTierType,
+  RsvpStatus,
+  CommunicationChannel,
+  CheckInFlagStatus,
 } from '@prisma/client';
 import {
   FilterIndividualEventsDto,
@@ -25,6 +27,7 @@ import {
   UpdateSetupStepDto,
   InviteGuestDto,
 } from './dto/individual-events.dto';
+import { CommunicationsService } from '../communications/communications.service';
 
 @Injectable()
 export class IndividualEventsService {
@@ -36,205 +39,22 @@ export class IndividualEventsService {
   // In-memory flagged exceptions cache for live turnstile monitor
   private readonly flaggedExceptionsMap = new Map<string, any[]>();
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CommunicationsService)
+    private readonly communicationsService: CommunicationsService,
+  ) {}
 
   /**
    * Resolve individual organizer user
    */
   private async resolveUser(userId?: string) {
+    if (!userId) return null;
     try {
-      if (userId) {
-        const found = await this.prisma.user.findUnique({ where: { id: userId } });
-        if (found) return found;
-      }
-      return await this.prisma.user.findFirst({
-        where: {
-          OR: [
-            { role: UserRole.ORGANIZER_INDIVIDUAL },
-            { email: 'individual@mceniesvite.com' },
-            { email: 'organizer@mceniesvite.com' },
-          ],
-        },
-      });
+      return await this.prisma.user.findUnique({ where: { id: userId } });
     } catch {
       return null;
     }
-  }
-
-  /**
-   * Helper: Ensure at least one seeded event exists for the organizer
-   */
-  private async ensureSeedEvent(organizerId: string) {
-    const existing = await this.prisma.event.findFirst({
-      where: { organizerId },
-      include: { ticketTiers: true, tableZones: true, attendees: true },
-    });
-
-    if (existing) {
-      return existing;
-    }
-
-    this.logger.log(`Seeding initial individual event for organizer ${organizerId}`);
-    const slug = `the-grand-royal-gala-investiture-${Date.now().toString(36)}`;
-    const event = await this.prisma.event.create({
-      data: {
-        organizerId,
-        title: 'The Grand Royal Gala & Investiture',
-        slug,
-        description:
-          'An exclusive black-tie gala and investiture ceremony celebrating excellence, culture, and high society.',
-        category: 'Gala',
-        format: EventFormat.IN_PERSON,
-        status: EventStatus.LIVE,
-        startDate: new Date('2026-10-24T18:00:00.000Z'),
-        endDate: new Date('2026-10-24T23:00:00.000Z'),
-        venueName: 'The Monarch Event Centre',
-        address: '123 Water Corporation Drive, Victoria Island, Lagos',
-        city: 'Lagos',
-        country: 'Nigeria',
-        capacity: 350,
-        currency: 'NGN',
-        coverImageUrl:
-          'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
-        ticketTiers: {
-          create: [
-            {
-              name: 'VIP Royal Protocol',
-              type: TicketTierType.VIP,
-              price: 25000,
-              currency: 'NGN',
-              capacity: 100,
-              soldCount: 45,
-              perks: ['Red Carpet Access', 'VVIP Seating', 'Champagne Reception'],
-            },
-            {
-              name: 'General Admission',
-              type: TicketTierType.GENERAL,
-              price: 10000,
-              currency: 'NGN',
-              capacity: 250,
-              soldCount: 95,
-              perks: ['Gala Dinner Access', 'Souvenir Bag'],
-            },
-          ],
-        },
-        tableZones: {
-          create: [
-            {
-              zoneName: 'VVIP Royal Table Zone',
-              tableCount: 4,
-              seatPerTable: 8,
-              totalCapacity: 32,
-            },
-            {
-              zoneName: 'Presidential Suite Zone',
-              tableCount: 4,
-              seatPerTable: 8,
-              totalCapacity: 32,
-            },
-            {
-              zoneName: 'Ambassador Zone',
-              tableCount: 6,
-              seatPerTable: 10,
-              totalCapacity: 60,
-            },
-          ],
-        },
-      },
-      include: { ticketTiers: true, tableZones: true },
-    });
-
-    // Seed realistic attendees matching UI
-    const vipTier = event.ticketTiers.find((t) => t.type === TicketTierType.VIP);
-    const genTier = event.ticketTiers.find((t) => t.type === TicketTierType.GENERAL);
-
-    const initialGuests = [
-      {
-        fullName: 'Chief & Mrs. Babatunde Alabi',
-        email: 'babatunde.alabi@gmail.com',
-        phone: '+234 802 345 6789',
-        tierId: vipTier?.id || event.ticketTiers[0].id,
-        status: AttendeeStatus.CHECKED_IN,
-        notes: 'Party: 2 | RSVP: Confirmed | Channel: WhatsApp | Pref: Jollof & Grilled Croaker • Table 01 (VVIP Royal)',
-        qrCode: `MCV-${event.id.slice(0, 4)}-001`,
-        checkInTime: new Date(Date.now() - 1000 * 60 * 15),
-      },
-      {
-        fullName: 'Princess Zainab Bello',
-        email: 'zainab.bello@heritage.ng',
-        phone: '+234 803 112 4433',
-        tierId: genTier?.id || event.ticketTiers[0].id,
-        status: AttendeeStatus.CHECKED_IN,
-        notes: 'Party: 2 | RSVP: Confirmed | Channel: WhatsApp | Pref: Jollof & Grilled Croaker • Table 04 (Ambassador)',
-        qrCode: `MCV-${event.id.slice(0, 4)}-002`,
-        checkInTime: new Date(Date.now() - 1000 * 60 * 42),
-      },
-      {
-        fullName: 'Dr. Ifeanyi Nwosu',
-        email: 'ifeanyi.nwosu@apexmed.com',
-        phone: '+234 805 776 1122',
-        tierId: genTier?.id || event.ticketTiers[0].id,
-        status: AttendeeStatus.ATTENDING,
-        notes: 'Party: 1 | RSVP: Confirmed | Channel: Email | Pref: --',
-        qrCode: `MCV-${event.id.slice(0, 4)}-003`,
-      },
-      {
-        fullName: 'Chief Emeka Okonkwo',
-        email: 'e.okonkwo@transcorp.ng',
-        phone: '+234 802 998 7766',
-        tierId: vipTier?.id || event.ticketTiers[0].id,
-        status: AttendeeStatus.CHECKED_IN,
-        notes: 'Party: 1 | RSVP: Confirmed | Channel: WhatsApp | Pref: Table 01 (VVIP Royal)',
-        qrCode: `MCV-${event.id.slice(0, 4)}-004`,
-        checkInTime: new Date(Date.now() - 1000 * 60 * 6),
-      },
-      {
-        fullName: 'Senator Ademola Adeleke',
-        email: 'senator.adeleke@gov.ng',
-        phone: '+234 803 555 4321',
-        tierId: vipTier?.id || event.ticketTiers[0].id,
-        status: AttendeeStatus.ATTENDING,
-        notes: 'Party: 2 | RSVP: Confirmed | Channel: WhatsApp | Pref: Table 02 (Presidential)',
-        qrCode: `MCV-${event.id.slice(0, 4)}-005`,
-      },
-      {
-        fullName: 'Mrs. Folashade Tinubu-Ojo',
-        email: 'folashade.t@lagos.ng',
-        phone: '+234 802 111 2233',
-        tierId: vipTier?.id || event.ticketTiers[0].id,
-        status: AttendeeStatus.ATTENDING,
-        notes: 'Party: 1 | RSVP: Tentative | Channel: WhatsApp | Pref: Table 02 (Presidential)',
-        qrCode: `MCV-${event.id.slice(0, 4)}-006`,
-      },
-    ];
-
-    for (const g of initialGuests) {
-      await this.prisma.attendee.create({
-        data: {
-          eventId: event.id,
-          fullName: g.fullName,
-          email: g.email,
-          phone: g.phone,
-          ticketTierId: g.tierId,
-          status: g.status,
-          notes: g.notes,
-          qrCode: g.qrCode,
-          checkInTime: g.checkInTime,
-        },
-      });
-    }
-
-    const refreshed = await this.prisma.event.findUnique({
-      where: { id: event.id },
-      include: {
-        ticketTiers: true,
-        tableZones: { include: { assignments: { include: { attendee: true } } } },
-        attendees: { include: { ticketTier: true, tableSeat: true } },
-        staffShifts: { include: { staff: { include: { user: true } } } },
-      },
-    });
-
-    return refreshed || event;
   }
 
   /**
@@ -279,24 +99,9 @@ export class IndividualEventsService {
         orderBy: { createdAt: 'desc' },
       });
       if (first) return first;
-
-      // Ensure seed event
-      return await this.ensureSeedEvent(organizer.id);
     }
 
-    // Last resort fallback
-    const anyEvent = await this.prisma.event.findFirst({
-      include: {
-        ticketTiers: true,
-        tableZones: { include: { assignments: { include: { attendee: true } } } },
-        attendees: { include: { ticketTier: true, tableSeat: true } },
-        staffShifts: { include: { staff: { include: { user: true } } } },
-      },
-    });
-    if (!anyEvent) {
-      throw new NotFoundException('No individual events found');
-    }
-    return anyEvent;
+    throw new NotFoundException('Event not found. Create an event first.');
   }
 
   /**
@@ -307,9 +112,6 @@ export class IndividualEventsService {
     if (!user) {
       return { events: [], counts: { all: 0, active: 0, draft: 0, completed: 0 } };
     }
-
-    // Ensure at least one seed event exists
-    await this.ensureSeedEvent(user.id);
 
     const where: any = { organizerId: user.id };
 
@@ -393,14 +195,14 @@ export class IndividualEventsService {
         }),
         startDate: ev.startDate,
         endDate: ev.endDate,
-        venueName: ev.venueName || 'To Be Announced',
-        address: ev.address || '',
-        city: ev.city || 'Lagos',
-        country: ev.country || 'Nigeria',
-        guestsCount: attendeesCount > 0 ? attendeesCount : 350,
-        confirmedCount: confirmedCount > 0 ? confirmedCount : 60,
-        checkedInCount: checkedInCount > 0 ? checkedInCount : 48,
-        totalTarget: ev.capacity || 100,
+        venueName: ev.venueName,
+        address: ev.address,
+        city: ev.city,
+        country: ev.country,
+        guestsCount: attendeesCount,
+        confirmedCount,
+        checkedInCount,
+        totalTarget: ev.capacity,
         daysLeft,
         countdown: {
           days: daysLeft,
@@ -448,13 +250,13 @@ export class IndividualEventsService {
       Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60)),
     );
 
-    const totalInvited = ev.attendees?.length || 350;
+    const totalInvited = ev.attendees?.length ?? 0;
     const confirmedCount =
       ev.attendees?.filter(
         (a: any) => a.status === AttendeeStatus.ATTENDING || a.status === AttendeeStatus.CHECKED_IN,
-      ).length || 60;
+      ).length ?? 0;
     const checkedInCount =
-      ev.attendees?.filter((a: any) => a.status === AttendeeStatus.CHECKED_IN).length || 48;
+      ev.attendees?.filter((a: any) => a.status === AttendeeStatus.CHECKED_IN).length ?? 0;
 
     const vipAttendees =
       ev.attendees?.filter((a: any) => a.ticketTier?.type === TicketTierType.VIP) || [];
@@ -465,7 +267,7 @@ export class IndividualEventsService {
     // Retrieve or initialize setup checklist state (6 steps)
     const eventKey = ev.id;
     if (!this.setupStepsState.has(eventKey)) {
-      this.setupStepsState.set(eventKey, [true, true, true, true, false, false]);
+      this.setupStepsState.set(eventKey, [true, false, false, false, false, false]);
     }
     const stepsStatus = this.setupStepsState.get(eventKey)!;
 
@@ -525,11 +327,11 @@ export class IndividualEventsService {
         status: uiStatus,
         rawStatus: ev.status,
         description: ev.description,
-        venueName: ev.venueName || 'The Monarch Event Centre',
-        address: ev.address || '123 Water Corporation Drive, Victoria Island, Lagos',
-        city: ev.city || 'Lagos',
-        country: ev.country || 'Nigeria',
-        capacity: ev.capacity || 350,
+        venueName: ev.venueName,
+        address: ev.address,
+        city: ev.city,
+        country: ev.country,
+        capacity: ev.capacity,
         startDate: ev.startDate,
         endDate: ev.endDate,
         dateFormatted: ev.startDate.toLocaleDateString('en-GB', {
@@ -545,8 +347,8 @@ export class IndividualEventsService {
       kpis: {
         totalInvited: {
           current: totalInvited,
-          target: ev.capacity || 500,
-          label: `${totalInvited}/${ev.capacity || 500} Guests`,
+          target: ev.capacity,
+          label: `${totalInvited}/${ev.capacity} Guests`,
         },
         confirmedRsvp: {
           current: confirmedCount,
@@ -557,9 +359,9 @@ export class IndividualEventsService {
           rate: `${Math.round((checkedInCount / Math.max(1, totalInvited)) * 100)}%`,
         },
         vipAttendance: {
-          current: vipCheckedIn || 24,
-          total: vipAttendees.length || 30,
-          rate: `${Math.round(((vipCheckedIn || 24) / Math.max(1, vipAttendees.length || 30)) * 100)}%`,
+          current: vipCheckedIn,
+          total: vipAttendees.length,
+          rate: `${Math.round((vipCheckedIn / Math.max(1, vipAttendees.length)) * 100)}%`,
         },
       },
       countdown: {
@@ -597,61 +399,17 @@ export class IndividualEventsService {
         organizerId: user.id,
         title: dto.title,
         slug,
-        category: dto.category || 'Gala',
-        description:
-          dto.description ||
-          'Black-tie gala and celebration featuring red carpet reception and dinner.',
+        category: dto.category || 'General',
+        description: dto.description || '',
         format: dto.format || EventFormat.IN_PERSON,
         status: dto.status || EventStatus.DRAFT,
         startDate,
         endDate,
         capacity: dto.capacity || 100,
-        venueName: dto.venueName || 'The Monarch Event Centre',
-        address: dto.address || 'Victoria Island, Lagos',
-        city: dto.city || 'Lagos',
-        country: dto.country || 'Nigeria',
-        ticketTiers: {
-          create: [
-            {
-              name: 'VIP Royal Protocol',
-              type: TicketTierType.VIP,
-              price: 25000,
-              currency: 'NGN',
-              capacity: Math.floor((dto.capacity || 100) * 0.3),
-              perks: ['Red Carpet Access', 'VVIP Seating', 'Champagne Reception'],
-            },
-            {
-              name: 'General Admission',
-              type: TicketTierType.GENERAL,
-              price: 10000,
-              currency: 'NGN',
-              capacity: Math.floor((dto.capacity || 100) * 0.7),
-              perks: ['Gala Dinner Access', 'Souvenir Bag'],
-            },
-          ],
-        },
-        tableZones: {
-          create: [
-            {
-              zoneName: 'VVIP Royal Table Zone',
-              tableCount: 2,
-              seatPerTable: 8,
-              totalCapacity: 16,
-            },
-            {
-              zoneName: 'Presidential Suite Zone',
-              tableCount: 4,
-              seatPerTable: 8,
-              totalCapacity: 32,
-            },
-            {
-              zoneName: 'Ambassador Zone',
-              tableCount: 6,
-              seatPerTable: 10,
-              totalCapacity: 60,
-            },
-          ],
-        },
+        venueName: dto.venueName,
+        address: dto.address,
+        city: dto.city,
+        country: dto.country,
       },
       include: {
         ticketTiers: true,
@@ -704,7 +462,7 @@ export class IndividualEventsService {
     const eventKey = ev.id;
 
     if (!this.setupStepsState.has(eventKey)) {
-      this.setupStepsState.set(eventKey, [true, true, true, true, false, false]);
+      this.setupStepsState.set(eventKey, [true, false, false, false, false, false]);
     }
     const current = this.setupStepsState.get(eventKey)!;
     if (dto.stepIndex >= 0 && dto.stepIndex < current.length) {
@@ -766,33 +524,7 @@ export class IndividualEventsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Map attendees to frontend guest model
     let guests = attendees.map((a) => {
-      // Parse preference / party size / rsvp status from notes or defaults
-      let partySize = 1;
-      let rsvpStatus = 'Confirmed';
-      let inviteThrough = 'WhatsApp';
-      let preference = '--';
-      let isFlagged = false;
-
-      if (a.notes) {
-        const partyMatch = a.notes.match(/Party:\s*(\d+)/i);
-        if (partyMatch) partySize = parseInt(partyMatch[1], 10);
-
-        const rsvpMatch = a.notes.match(/RSVP:\s*([a-zA-Z\s]+)/i);
-        if (rsvpMatch) rsvpStatus = rsvpMatch[1].trim();
-
-        const channelMatch = a.notes.match(/Channel:\s*([a-zA-Z]+)/i);
-        if (channelMatch) inviteThrough = channelMatch[1].trim();
-
-        const prefMatch = a.notes.match(/Pref:\s*(.+)/i);
-        if (prefMatch) preference = prefMatch[1].trim();
-
-        if (a.notes.includes('FLAGGED') || a.notes.includes('Exception')) {
-          isFlagged = true;
-        }
-      }
-
       let checkInStatus = 'Not Arrived';
       if (a.status === AttendeeStatus.CHECKED_IN) {
         checkInStatus = 'Checked-In';
@@ -800,25 +532,18 @@ export class IndividualEventsService {
         checkInStatus = 'Rejected';
       }
 
-      const type =
-        a.ticketTier?.type === TicketTierType.VIP
-          ? 'VIP'
-          : a.notes?.includes('Family')
-          ? 'Family & Friends'
-          : 'General';
-
       return {
         id: a.id,
         name: a.fullName,
         email: a.email,
         phone: a.phone || '+234 800 000 0000',
-        type,
+        type: a.guestType || (a.ticketTier?.type === TicketTierType.VIP ? 'VIP' : 'General'),
         checkInStatus,
-        rsvpStatus,
-        inviteThrough,
-        partySize,
-        preference,
-        isFlagged,
+        rsvpStatus: this.rsvpLabel(a.rsvpStatus),
+        inviteThrough: this.channelLabel(a.inviteChannel),
+        partySize: a.partySize,
+        preference: a.dietaryPreference || '--',
+        isFlagged: a.isFlagged,
         qrCode: a.qrCode,
         tableSeat: a.tableSeat
           ? `Table 0${a.tableSeat.tableNumber} (${a.tableSeat.zone.zoneName})`
@@ -850,7 +575,7 @@ export class IndividualEventsService {
     const total = attendees.length;
     const checkedIn = attendees.filter((a) => a.status === AttendeeStatus.CHECKED_IN).length;
     const confirmed = attendees.filter(
-      (a) => a.status === AttendeeStatus.ATTENDING || a.status === AttendeeStatus.CHECKED_IN,
+      (a) => a.rsvpStatus === RsvpStatus.CONFIRMED || a.status === AttendeeStatus.CHECKED_IN,
     ).length;
     const flagged = guests.filter((g) => g.isFlagged).length;
 
@@ -891,30 +616,30 @@ export class IndividualEventsService {
           type: dto.type?.toUpperCase().includes('VIP')
             ? TicketTierType.VIP
             : TicketTierType.GENERAL,
-          price: dto.type?.toUpperCase().includes('VIP') ? 25000 : 10000,
-          capacity: 100,
+          price: 0,
+          capacity: ev.capacity,
         },
       });
     }
 
     const qrCode = `MCV-${ev.id.slice(0, 4)}-${Date.now().toString(36).toUpperCase()}`;
 
-    const notes = `Party: ${dto.partySize || 1} | RSVP: ${
-      dto.rsvpStatus || 'Confirmed'
-    } | Channel: ${dto.inviteThrough || 'WhatsApp'} | Pref: ${dto.preference || '--'}`;
-
     const attendee = await this.prisma.attendee.create({
       data: {
         eventId: ev.id,
         fullName: dto.name,
-        email: dto.email || `${dto.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@guest.mcenies.com`,
+        email: dto.email || '',
         phone: dto.phone,
         ticketTierId: tier.id,
+        guestType: dto.type || 'General',
+        rsvpStatus: this.mapRsvp(dto.rsvpStatus),
+        partySize: dto.partySize || 1,
+        dietaryPreference: dto.preference,
+        inviteChannel: this.mapInviteChannel(dto.inviteThrough),
         status:
           dto.checkInStatus === 'Checked-In'
             ? AttendeeStatus.CHECKED_IN
-            : AttendeeStatus.ATTENDING,
-        notes,
+            : AttendeeStatus.PENDING,
         qrCode,
       },
       include: { ticketTier: true },
@@ -966,33 +691,24 @@ export class IndividualEventsService {
       throw new NotFoundException(`Guest ${guestId} not found`);
     }
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     if (dto.name) updateData.fullName = dto.name;
     if (dto.email) updateData.email = dto.email;
     if (dto.phone) updateData.phone = dto.phone;
+    if (dto.partySize !== undefined) updateData.partySize = dto.partySize;
+    if (dto.preference) updateData.dietaryPreference = dto.preference;
+    if (dto.rsvpStatus) updateData.rsvpStatus = this.mapRsvp(dto.rsvpStatus);
+    if (dto.inviteThrough) updateData.inviteChannel = this.mapInviteChannel(dto.inviteThrough);
+    if (dto.type) updateData.guestType = dto.type;
 
     if (dto.checkInStatus) {
       updateData.status =
         dto.checkInStatus === 'Checked-In'
           ? AttendeeStatus.CHECKED_IN
-          : AttendeeStatus.ATTENDING;
+          : AttendeeStatus.PENDING;
       if (dto.checkInStatus === 'Checked-In') {
         updateData.checkInTime = new Date();
       }
-    }
-
-    if (dto.preference || dto.partySize || dto.rsvpStatus || dto.inviteThrough) {
-      const currentNotes = attendee.notes || '';
-      const party =
-        dto.partySize !== undefined
-          ? dto.partySize
-          : (currentNotes.match(/Party:\s*(\d+)/)?.[1] || 1);
-      const rsvp = dto.rsvpStatus || (currentNotes.match(/RSVP:\s*([a-zA-Z\s]+)/)?.[1] || 'Confirmed');
-      const channel =
-        dto.inviteThrough || (currentNotes.match(/Channel:\s*([a-zA-Z]+)/)?.[1] || 'WhatsApp');
-      const pref = dto.preference || (currentNotes.match(/Pref:\s*(.+)/)?.[1] || '--');
-
-      updateData.notes = `Party: ${party} | RSVP: ${rsvp} | Channel: ${channel} | Pref: ${pref}`;
     }
 
     const updated = await this.prisma.attendee.update({
@@ -1014,33 +730,47 @@ export class IndividualEventsService {
   /**
    * 13. SEND GUEST INVITATION
    */
-  async sendGuestInvite(eventId: string, guestId: string, dto?: InviteGuestDto) {
-    const attendee = await this.prisma.attendee.findUnique({ where: { id: guestId } });
-    if (!attendee) {
-      throw new NotFoundException(`Guest ${guestId} not found`);
+  async sendAllInvites(eventId: string) {
+    const ev = await this.resolveEvent(eventId);
+    const pending = await this.prisma.attendee.findMany({
+      where: { eventId: ev.id, rsvpStatus: RsvpStatus.NOT_SENT },
+      select: { id: true },
+    });
+
+    let sent = 0;
+    let failed = 0;
+    for (const guest of pending) {
+      try {
+        await this.communicationsService.dispatchInvite(ev.id, guest.id);
+        sent += 1;
+      } catch (err: any) {
+        failed += 1;
+        this.logger.error(`Invite failed for guest ${guest.id}: ${err.message}`);
+      }
     }
 
-    const channel = dto?.channel || 'WhatsApp';
+    const message =
+      pending.length === 0
+        ? 'Every guest already has an invitation.'
+        : failed > 0
+          ? `Sent ${sent} invitation${sent === 1 ? '' : 's'}. ${failed} could not be sent.`
+          : `Sent ${sent} invitation${sent === 1 ? '' : 's'}.`;
 
-    // Record in guest communications log
-    try {
-      await this.prisma.guestCommunication.create({
-        data: {
-          eventId,
-          subject: 'Your Royal Gala VIP Invitation',
-          content: `Hello ${attendee.fullName}, your digital pass for The Grand Royal Gala & Investiture has been generated. QR Pass: ${attendee.qrCode}`,
-          targetAudience: attendee.email,
-          recipientsCount: 1,
-          deliveredCount: 1,
-        },
-      });
-    } catch {}
+    return { message, data: { sent, failed, total: pending.length } };
+  }
 
+  async sendGuestInvite(eventId: string, guestId: string, dto?: InviteGuestDto) {
+    const result = await this.communicationsService.dispatchInvite(
+      eventId,
+      guestId,
+      dto?.channel,
+    );
     return {
       success: true,
       guestId,
-      channel,
-      message: `Invitation successfully dispatched to ${attendee.fullName} via ${channel}.`,
+      channel: dto?.channel || 'coordinated',
+      ...result,
+      message: `Invitation dispatched to guest via ${result.channels.join(', ')}.`,
     };
   }
 
@@ -1048,15 +778,15 @@ export class IndividualEventsService {
    * 14. SEND GUEST REMINDER
    */
   async sendGuestReminder(eventId: string, guestId: string) {
-    const attendee = await this.prisma.attendee.findUnique({ where: { id: guestId } });
-    if (!attendee) {
-      throw new NotFoundException(`Guest ${guestId} not found`);
-    }
-
+    const deliveries = await this.communicationsService.dispatchReminder(
+      eventId,
+      guestId,
+    );
     return {
       success: true,
       guestId,
-      message: `Reminder successfully sent to ${attendee.fullName}.`,
+      deliveries,
+      message: 'Reminder dispatched across available channels.',
     };
   }
 
@@ -1196,51 +926,66 @@ export class IndividualEventsService {
     });
 
     const checkedInList = attendees.filter((a) => a.status === AttendeeStatus.CHECKED_IN);
-    const totalExpected = ev.capacity || 350;
-    const totalCheckedIn = checkedInList.length || 48;
+    const totalExpected = ev.capacity;
+    const totalCheckedIn = checkedInList.length;
     const percentage = Math.round((totalCheckedIn / Math.max(1, totalExpected)) * 100);
 
-    // Live scan feed matching Figma (media_1791786529322_c45cb809.png)
-    const liveActivityStream = checkedInList.slice(0, 10).map((a, i) => {
-      const minutesAgo = (i + 1) * 3;
-      return {
-        id: `scan-${a.id}`,
-        attendeeName: a.fullName,
-        ticketTier: a.ticketTier?.name || 'VIP Royal Protocol',
-        turnstile: i % 2 === 0 ? 'Turnstile A-1 (Main Gate)' : 'Turnstile VIP-1 (VIP Gate)',
-        scannedAt: a.checkInTime || new Date(Date.now() - 1000 * 60 * minutesAgo),
-        status: 'VALID',
-        staffName: 'Officer Ibrahim K.',
-      };
+    const scanLogs = await this.prisma.gateScanLog.findMany({
+      where: { attendee: { eventId: ev.id } },
+      include: {
+        attendee: { include: { ticketTier: true } },
+        staff: { include: { user: { select: { fullName: true } } } },
+      },
+      orderBy: { scannedAt: 'desc' },
     });
 
-    // In-memory flagged exceptions or default realistic exceptions
-    let flaggedExceptions = this.flaggedExceptionsMap.get(ev.id);
-    if (!flaggedExceptions || flaggedExceptions.length === 0) {
-      flaggedExceptions = [
-        {
-          flagId: 'fl-1',
-          attendeeName: 'Hon. Chinedu Eze',
-          phone: '+234 803 999 1122',
-          reason: 'Duplicate Pass Scanned at Gate B-2',
-          turnstile: 'Turnstile A-2',
-          timestamp: '2 mins ago',
-          severity: 'HIGH',
-          status: 'PENDING_RESOLVE',
-        },
-        {
-          flagId: 'fl-2',
-          attendeeName: 'Ambassador Sola Davies',
-          phone: '+234 802 888 3344',
-          reason: 'VIP Access Required (Holding General Pass)',
-          turnstile: 'Turnstile VIP-1',
-          timestamp: '7 mins ago',
-          severity: 'MEDIUM',
-          status: 'PENDING_RESOLVE',
-        },
-      ];
-      this.flaggedExceptionsMap.set(ev.id, flaggedExceptions);
+    const liveActivityStream = scanLogs.slice(0, 10).map((log) => ({
+      id: log.id,
+      attendeeName: log.attendee.fullName,
+      ticketTier: log.attendee.ticketTier?.name ?? null,
+      turnstile: log.gateTurnstile,
+      scannedAt: log.scannedAt,
+      status: log.scanResult,
+      staffName: log.staff?.user?.fullName ?? null,
+    }));
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+
+    const turnstileMap = new Map<string, { scannedToday: number; staff: string | null }>();
+    for (const log of scanLogs) {
+      const entry = turnstileMap.get(log.gateTurnstile) ?? { scannedToday: 0, staff: null };
+      if (log.scannedAt >= startOfToday) entry.scannedToday += 1;
+      entry.staff = entry.staff ?? log.staff?.user?.fullName ?? null;
+      turnstileMap.set(log.gateTurnstile, entry);
     }
+    const turnstiles = Array.from(turnstileMap.entries()).map(([name, t]) => ({
+      name,
+      status: 'ACTIVE',
+      scannedToday: t.scannedToday,
+      staff: t.staff,
+    }));
+
+    const recentScans = scanLogs.filter((log) => log.scannedAt.getTime() >= tenMinutesAgo).length;
+    const activeGateStaff = (ev.staffShifts ?? []).filter((s: any) => s.isActive).length;
+
+    const storedFlags = await this.prisma.checkInException.findMany({
+      where: { eventId: ev.id, status: CheckInFlagStatus.OPEN },
+      include: { attendee: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const flaggedExceptions = storedFlags.map((flag) => ({
+      flagId: flag.id,
+      attendeeName: flag.attendee.fullName,
+      phone: flag.attendee.phone,
+      reason: flag.reason,
+      turnstile: flag.turnstile,
+      timestamp: flag.createdAt.toISOString(),
+      severity: 'HIGH',
+      status: flag.status,
+    }));
 
     return {
       eventId: ev.id,
@@ -1249,18 +994,13 @@ export class IndividualEventsService {
         totalCheckedIn,
         totalExpected,
         checkInPercentage: percentage,
-        activeTurnstiles: 4,
-        throughputPerMinute: 8,
-        activeGateStaff: 6,
+        activeTurnstiles: turnstiles.length,
+        throughputPerMinute: Math.round((recentScans / 10) * 10) / 10,
+        activeGateStaff,
       },
       liveActivityStream,
       flaggedExceptions,
-      turnstiles: [
-        { name: 'Turnstile A-1 (General)', status: 'ACTIVE', scannedToday: 24, staff: 'Ibrahim K.' },
-        { name: 'Turnstile A-2 (General)', status: 'ACTIVE', scannedToday: 18, staff: 'Blessing A.' },
-        { name: 'Turnstile VIP-1 (Red Carpet)', status: 'ACTIVE', scannedToday: 12, staff: 'David O.' },
-        { name: 'Turnstile B-1 (Staff/Media)', status: 'ACTIVE', scannedToday: 6, staff: 'Fatima M.' },
-      ],
+      turnstiles,
     };
   }
 
@@ -1269,13 +1009,17 @@ export class IndividualEventsService {
    */
   async resolveCheckInFlag(eventId: string, dto: ResolveFlagDto) {
     const ev = await this.resolveEvent(eventId);
-    let flagged = this.flaggedExceptionsMap.get(ev.id) || [];
-
-    const targetIndex = flagged.findIndex((f) => f.flagId === dto.flagId);
-    if (targetIndex >= 0) {
-      flagged.splice(targetIndex, 1);
-      this.flaggedExceptionsMap.set(ev.id, flagged);
-    }
+    await this.prisma.checkInException.updateMany({
+      where: { id: dto.flagId, eventId: ev.id },
+      data: {
+        status: CheckInFlagStatus.RESOLVED,
+        resolvedAt: new Date(),
+        notes: dto.notes || dto.action,
+      },
+    });
+    const remaining = await this.prisma.checkInException.count({
+      where: { eventId: ev.id, status: CheckInFlagStatus.OPEN },
+    });
 
     return {
       success: true,
@@ -1285,8 +1029,45 @@ export class IndividualEventsService {
         dto.action === 'trust_staff'
           ? 'Staff override trusted. Guest approved for turnstile admission.'
           : 'Flag manually resolved by event host.',
-      remainingFlagsCount: flagged.length,
+      remainingFlagsCount: remaining,
     };
+  }
+
+  private mapRsvp(value?: string): RsvpStatus {
+    const v = (value || '').toLowerCase();
+    if (v.includes('confirm') || v.includes('accept')) return RsvpStatus.CONFIRMED;
+    if (v.includes('tentat')) return RsvpStatus.TENTATIVE;
+    if (v.includes('declin') || v.includes('reject')) return RsvpStatus.DECLINED;
+    if (v.includes('not sent')) return RsvpStatus.NOT_SENT;
+    return RsvpStatus.AWAITING;
+  }
+
+  private rsvpLabel(status: RsvpStatus) {
+    switch (status) {
+      case RsvpStatus.CONFIRMED:
+        return 'Confirmed';
+      case RsvpStatus.TENTATIVE:
+        return 'Tentative';
+      case RsvpStatus.DECLINED:
+        return 'Declined';
+      case RsvpStatus.NOT_SENT:
+        return 'Not Sent';
+      default:
+        return 'Awaiting Response';
+    }
+  }
+
+  private mapInviteChannel(value?: string): CommunicationChannel {
+    const v = (value || '').toUpperCase();
+    if (v === 'SMS') return CommunicationChannel.SMS;
+    if (v === 'EMAIL') return CommunicationChannel.EMAIL;
+    return CommunicationChannel.WHATSAPP;
+  }
+
+  private channelLabel(channel: CommunicationChannel) {
+    if (channel === CommunicationChannel.SMS) return 'SMS';
+    if (channel === CommunicationChannel.EMAIL) return 'Email';
+    return 'WhatsApp';
   }
 
   /**

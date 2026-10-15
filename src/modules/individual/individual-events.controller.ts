@@ -37,7 +37,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUserDto } from '../../common/dto/current-user.dto';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Individual - Events')
+@ApiTags('02 Individual Organizer / Events')
 @Controller(['individual/events', 'organizer/individual/events'])
 @UseGuards(OptionalJwtAuthGuard)
 @ApiBearerAuth()
@@ -225,6 +225,16 @@ export class IndividualEventsController {
     @Param('guestId') guestId: string,
   ) {
     return this.eventsService.deleteGuest(id, guestId);
+  }
+
+  @Post(':id/guests/invitations')
+  @ResponseMessage('Invitations dispatched')
+  @ApiOperation({
+    summary: '[Individual Organizer] Send invitations to every guest who has not been invited',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  async sendAllInvites(@Param('id') id: string) {
+    return this.eventsService.sendAllInvites(id);
   }
 
   @Post(':id/guests/:guestId/invite')

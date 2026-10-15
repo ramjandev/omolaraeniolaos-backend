@@ -1,6 +1,6 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UserRole, EventStatus, AttendeeStatus, OrderStatus } from '@prisma/client';
+import { EventStatus, AttendeeStatus, OrderStatus } from '@prisma/client';
 import {
   IndividualDashboardResponseDto,
   IndividualUserDto,
@@ -21,33 +21,10 @@ export class IndividualDashboardService {
    * Resolve relational User record for individual organizer
    */
   private async resolveUser(userId?: string): Promise<IndividualUserDto | null> {
+    if (!userId) return null;
     try {
-      if (userId) {
-        const found = await this.prisma.user.findUnique({
-          where: { id: userId },
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            phone: true,
-            avatarUrl: true,
-            role: true,
-            status: true,
-            createdAt: true,
-          },
-        });
-        if (found) return found;
-      }
-
-      // Default to seeded individual organizer record
-      const defaultUser = await this.prisma.user.findFirst({
-        where: {
-          OR: [
-            { role: UserRole.ORGANIZER_INDIVIDUAL },
-            { email: 'individual@mceniesvite.com' },
-            { email: 'organizer@mceniesvite.com' },
-          ],
-        },
+      return await this.prisma.user.findUnique({
+        where: { id: userId },
         select: {
           id: true,
           fullName: true,
@@ -59,8 +36,6 @@ export class IndividualDashboardService {
           createdAt: true,
         },
       });
-
-      return defaultUser;
     } catch (err: any) {
       this.logger.error(`Error resolving user from database: ${err.message}`);
       return null;
@@ -72,7 +47,10 @@ export class IndividualDashboardService {
    */
   async getDashboardOverview(userId?: string): Promise<IndividualDashboardResponseDto> {
     const user = await this.resolveUser(userId);
-    const targetUserId = user?.id;
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    const targetUserId = user.id;
 
     // 1. Relational Active Event Query with relations
     let activeEvent: any = null;
@@ -80,41 +58,6 @@ export class IndividualDashboardService {
       if (targetUserId) {
         activeEvent = await this.prisma.event.findFirst({
           where: { organizerId: targetUserId },
-          orderBy: { createdAt: 'desc' },
-          include: {
-            ticketTiers: {
-              select: {
-                id: true,
-                name: true,
-                price: true,
-                capacity: true,
-                soldCount: true,
-              },
-            },
-            tableZones: {
-              select: {
-                id: true,
-                zoneName: true,
-                tableCount: true,
-                seatPerTable: true,
-                totalCapacity: true,
-              },
-            },
-            _count: {
-              select: {
-                attendees: true,
-                orders: true,
-                ticketTiers: true,
-                tableZones: true,
-              },
-            },
-          },
-        });
-      }
-
-      // Fallback to first available gala/individual event in the database if user has not yet created an event
-      if (!activeEvent) {
-        activeEvent = await this.prisma.event.findFirst({
           orderBy: { createdAt: 'desc' },
           include: {
             ticketTiers: {
@@ -307,16 +250,7 @@ export class IndividualDashboardService {
     }
 
     return {
-      user: user || {
-        id: targetUserId || '',
-        fullName: 'Individual Organizer',
-        email: 'individual@mceniesvite.com',
-        phone: null,
-        avatarUrl: null,
-        role: UserRole.ORGANIZER_INDIVIDUAL,
-        status: 'ACTIVE' as any,
-        createdAt: new Date(),
-      },
+      user,
       activeEvent,
       setupChecklist,
       metrics,
@@ -333,7 +267,7 @@ export class IndividualDashboardService {
     const targetUserId = user?.id;
 
     return this.prisma.event.findMany({
-      where: targetUserId ? { organizerId: targetUserId } : {},
+      where: { organizerId: targetUserId ?? '' },
       include: {
         ticketTiers: true,
         tableZones: true,
@@ -356,7 +290,7 @@ export class IndividualDashboardService {
     const targetUserId = user?.id;
 
     return this.prisma.attendee.findMany({
-      where: targetUserId ? { event: { organizerId: targetUserId } } : {},
+      where: { event: { organizerId: targetUserId ?? '' } },
       include: {
         event: {
           select: {

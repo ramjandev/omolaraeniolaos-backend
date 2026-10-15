@@ -9,14 +9,14 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Admin Plans')
+@ApiTags('01 Super Admin / Plans')
 @Controller('admin/plans')
 export class AdminPlansController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Plan created successfully')
   @ApiOperation({
@@ -49,7 +49,7 @@ export class AdminPlansController {
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Plan updated successfully')
   @ApiOperation({
@@ -63,7 +63,7 @@ export class AdminPlansController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Plan deleted successfully')
   @ApiOperation({

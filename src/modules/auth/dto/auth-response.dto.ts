@@ -11,7 +11,7 @@ export class AuthUserDto {
   @ApiProperty({ example: 'Omolara Eniola', type: String })
   fullName: string;
 
-  @ApiProperty({ enum: UserRole, example: UserRole.ORGANIZER_INDIVIDUAL })
+  @ApiProperty({ enum: UserRole, example: UserRole.INDIVIDUAL })
   role: UserRole;
 
   @ApiProperty({ example: 'https://images.unsplash.com/avatar.jpg', nullable: true, required: false, type: String })

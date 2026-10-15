@@ -9,8 +9,11 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Admin Revenue & Plans')
+@ApiTags('01 Super Admin / Revenue')
 @Controller('admin/revenue')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiBearerAuth()
 export class AdminRevenuePlansController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 
@@ -87,7 +90,7 @@ export class AdminRevenuePlansController {
 
   @Post('plans')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Plan created successfully')
   @ApiOperation({
@@ -120,7 +123,7 @@ export class AdminRevenuePlansController {
 
   @Put('plans/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Plan updated successfully')
   @ApiOperation({
@@ -134,7 +137,7 @@ export class AdminRevenuePlansController {
 
   @Delete('plans/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Plan deleted successfully')
   @ApiOperation({

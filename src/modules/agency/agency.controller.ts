@@ -10,7 +10,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUserDto } from '../../common/dto/current-user.dto';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Agency Operations')
+@ApiTags('03 Agency Organizer / Workspace')
 @Controller('agency')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
@@ -18,15 +18,15 @@ export class AgencyController {
   constructor(@Inject(AgencyService) private readonly agencyService: AgencyService) {}
 
   @Get('clients')
-  @Roles(UserRole.ORGANIZER_AGENCY, UserRole.SUPER_ADMIN)
+  @Roles(UserRole.AGENCY, UserRole.ADMIN)
   @ResponseMessage('Agency clients retrieved successfully')
   @ApiOperation({ summary: 'List corporate clients managed by the agency' })
-  async getClients() {
-    return this.agencyService.getClients();
+  async getClients(@CurrentUser() user: CurrentUserDto) {
+    return this.agencyService.getClients(user.id, user.role);
   }
 
   @Post('clients')
-  @Roles(UserRole.ORGANIZER_AGENCY, UserRole.SUPER_ADMIN)
+  @Roles(UserRole.AGENCY, UserRole.ADMIN)
   @ResponseMessage('Client account created successfully')
   @ApiOperation({ summary: 'Add a new retainer client account' })
   @ApiBody({ type: CreateClientDto })
@@ -36,10 +36,10 @@ export class AgencyController {
   }
 
   @Get('invoices')
-  @Roles(UserRole.ORGANIZER_AGENCY, UserRole.SUPER_ADMIN)
+  @Roles(UserRole.AGENCY, UserRole.ADMIN)
   @ResponseMessage('Agency invoices retrieved successfully')
   @ApiOperation({ summary: 'List agency B2B billing invoices' })
-  async getInvoices() {
-    return this.agencyService.getInvoices();
+  async getInvoices(@CurrentUser() user: CurrentUserDto) {
+    return this.agencyService.getInvoices(user.id, user.role);
   }
 }

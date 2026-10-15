@@ -8,8 +8,11 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
-@ApiTags('Admin Organizers')
+@ApiTags('01 Super Admin / Organizers')
 @Controller('admin/organizers')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiBearerAuth()
 export class AdminOrganizersController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 
@@ -35,8 +38,11 @@ export class AdminOrganizersController {
   }
 }
 
-@ApiTags('Admin')
+@ApiTags('01 Super Admin / Dashboard')
 @Controller('admin')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiBearerAuth()
 export class AdminController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 
@@ -65,7 +71,7 @@ export class AdminController {
 
   @Get('audit-logs')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN)
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ResponseMessage('Compliance audit logs retrieved successfully')
   @ApiOperation({ summary: '[Admin Only] Retrieve security, financial, and compliance audit logs' })

@@ -4,11 +4,11 @@
 // =============================================================================
 
 export enum UserRole {
-  SUPER_ADMIN = 'SUPER_ADMIN',
-  ORGANIZER_INDIVIDUAL = 'ORGANIZER_INDIVIDUAL',
-  ORGANIZER_AGENCY = 'ORGANIZER_AGENCY',
-  ORGANIZER_VENUE = 'ORGANIZER_VENUE',
-  GATE_STAFF = 'GATE_STAFF',
+  ADMIN = 'ADMIN',
+  INDIVIDUAL = 'INDIVIDUAL',
+  AGENCY = 'AGENCY',
+  VENUE = 'VENUE',
+  GATE = 'GATE',
   GUEST = 'GUEST',
 }
 

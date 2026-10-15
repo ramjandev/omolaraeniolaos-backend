@@ -70,7 +70,7 @@ export class EventsService {
 
   async publish(id: string, user: any) {
     const event = await this.findOne(id);
-    if (event.organizerId !== user.id && user.role !== UserRole.SUPER_ADMIN) {
+    if (event.organizerId !== user.id && user.role !== UserRole.ADMIN) {
       throw new ForbiddenException('You do not have permission to publish this event');
     }
 

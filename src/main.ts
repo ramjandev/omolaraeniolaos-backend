@@ -5,6 +5,11 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import {
+  SWAGGER_DESCRIPTION,
+  SWAGGER_TAG_GROUPS,
+  SWAGGER_TAGS,
+} from './swagger/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -35,60 +40,33 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   // OpenAPI / Swagger Documentation
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('McEniesVite Event Management OS API')
-    .setDescription(
-      `
-### Enterprise NestJS Event Management Platform
-Architecture for all 6 ecosystem roles:
-- **Organizer (Individual)**: Multi-step registration, events catalog, ticket tier pricing, attendee management, and broadcasts.
-- **Organizer (Agency)**: Workspace setup, corporate retainer accounts, production crew assignments, and B2B billing.
-- **Organizer (Venue)**: Hospitality profile, spaces leasing, bookings calendar, and banquet table layouts.
-- **Gate Staff**: High-concurrency QR scanner validation and shift logs.
-- **Guest**: Attendee passes, session schedules, and profile.
-- **Super Admin**: Ecosystem telemetry matching Figma dashboard (142 Organizers, 847 Events, ₦4.2M Revenue).
+  const swaggerBuilder = new DocumentBuilder()
+    .setTitle('McEniesVite Event OS API')
+    .setDescription(SWAGGER_DESCRIPTION)
+    .setVersion('1.1.0')
+    .addBearerAuth();
 
----
+  for (const tag of SWAGGER_TAGS) {
+    swaggerBuilder.addTag(tag.name, tag.description);
+  }
 
-### 🔑 Demo Credentials (Password for ALL accounts: \`Password123!\`)
-
-| # | Role | Email |
-|---|------|-------|
-| 1 | SUPER_ADMIN | admin@mceniesvite.com |
-| 2 | ORGANIZER_INDIVIDUAL | individual@mceniesvite.com |
-| 3 | ORGANIZER_AGENCY | agency@mceniesvite.com |
-| 4 | ORGANIZER_VENUE | venue@mceniesvite.com |
-| 5 | GATE_STAFF | gatestaff@mceniesvite.com |
-| 6 | GUEST | guest@mceniesvite.com |
-      `,
-    )
-    .setVersion('1.0.0')
-    .addTag(
-      'Individual - Dashboard',
-      'Dashboard telemetry, setup checklist, and live guest activities for Individual Organizers',
-    )
-    .addTag(
-      'Individual - Events',
-      'Events lifecycle, 6-step setup, guest roster & RSVP, table seating blueprint, and live turnstile monitor for Individual Organizers',
-    )
-    .addTag(
-      'Individual - Gate Management',
-      'Dedicated Gate Staff management, assignment, and invitation for Individual Organizers',
-    )
-    .addBearerAuth()
-    .build();
-
+  const swaggerConfig = swaggerBuilder.build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document, {
-    customSiteTitle: 'McEniesVite API Documentation',
+  (document as { 'x-tagGroups'?: typeof SWAGGER_TAG_GROUPS })['x-tagGroups'] =
+    SWAGGER_TAG_GROUPS;
+
+  const swaggerUi = {
+    customSiteTitle: 'McEniesVite API - six roles',
     swaggerOptions: {
       persistAuthorization: true,
       docExpansion: 'list',
+      tagsSorter: 'alpha',
+      operationsSorter: 'alpha',
     },
-  });
+  };
 
-  // Secondary convenient route
-  SwaggerModule.setup('docs', app, document);
+  SwaggerModule.setup('api/docs', app, document, swaggerUi);
+  SwaggerModule.setup('docs', app, document, swaggerUi);
 
   const PORT = Number(process.env.PORT) || 5000;
 

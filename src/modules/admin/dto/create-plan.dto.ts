@@ -19,6 +19,14 @@ export class CreatePlanDto {
   @IsString()
   planName: string;
 
+  @ApiPropertyOptional({
+    example: 'Ideal for weddings, large celebrations, galas and social banquets.',
+    description: 'Short description shown on the plan card',
+  })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
   @ApiProperty({ example: 35000, description: 'Price in Naira (NGN)' })
   @IsNotEmpty()
   price: number | string;

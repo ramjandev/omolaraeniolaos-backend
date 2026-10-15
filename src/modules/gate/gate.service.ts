@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, Inject } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Inject, HttpException } from '@nestjs/common';
 import { AttendeeStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScanDto } from './dto/scan.dto';
@@ -32,6 +32,18 @@ export class GateService {
           gateTurnstile: dto.gateTurnstile || 'Gate A-1',
         },
       });
+      await this.prisma.checkInException.create({
+        data: {
+          eventId: attendee.eventId,
+          attendeeId: attendee.id,
+          reason: 'Duplicate Pass Scanned',
+          turnstile: dto.gateTurnstile || 'Gate A-1',
+        },
+      });
+      await this.prisma.attendee.update({
+        where: { id: attendee.id },
+        data: { isFlagged: true },
+      });
 
       throw new ConflictException({
         result: 'DUPLICATE',
@@ -44,11 +56,13 @@ export class GateService {
       });
     }
 
+    const scannedAt = dto.scannedAt ? new Date(dto.scannedAt) : new Date();
+
     const updated = await this.prisma.attendee.update({
       where: { id: attendee.id },
       data: {
         status: AttendeeStatus.CHECKED_IN,
-        checkInTime: new Date(),
+        checkInTime: scannedAt,
         checkedInBy: dto.staffId || 'Turnstile Scanner',
       },
       include: { ticketTier: true },
@@ -85,5 +99,54 @@ export class GateService {
         event: { select: { title: true } },
       },
     });
+  }
+
+  async syncOfflineScans(scans: ScanDto[]) {
+    const results = [];
+    for (const scan of scans) {
+      try {
+        const data = await this.verify(scan);
+        await this.prisma.offlineScan.upsert({
+          where: { clientScanId: scan.clientScanId || `${scan.qrCode}-${scan.scannedAt}` },
+          update: { result: 'VALID', syncedAt: new Date() },
+          create: {
+            clientScanId: scan.clientScanId || `${scan.qrCode}-${Date.now()}`,
+            qrCode: scan.qrCode,
+            gateTurnstile: scan.gateTurnstile || 'A-1',
+            capturedAt: scan.scannedAt ? new Date(scan.scannedAt) : new Date(),
+            result: 'VALID',
+          },
+        });
+        results.push({ clientScanId: scan.clientScanId, ok: true, data });
+      } catch (error: unknown) {
+        const status = error instanceof HttpException ? error.getStatus() : 400;
+        const message =
+          error instanceof Error ? error.message : 'Scan could not be synced';
+        results.push({
+          clientScanId: scan.clientScanId,
+          ok: status === 409,
+          duplicate: status === 409,
+          error: message,
+        });
+      }
+    }
+    return { synced: results.length, results };
+  }
+
+  async samplePass() {
+    if ((process.env.NODE_ENV || 'development') === 'production') {
+      return { available: false };
+    }
+    const attendee = await this.prisma.attendee.findFirst({
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        fullName: true,
+        qrCode: true,
+        status: true,
+        event: { select: { title: true } },
+      },
+    });
+    return { available: Boolean(attendee), attendee };
   }
 }

@@ -445,7 +445,7 @@ export class CommunicationsService {
     };
 
     try {
-      const response = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+      const response = await fetch(`https://graph.facebook.com/v25.0/${phoneId}/messages`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -479,7 +479,7 @@ export class CommunicationsService {
     if (!token || !wabaId) return this.templateSlotCache;
 
     try {
-      const url = `https://graph.facebook.com/v21.0/${wabaId}/message_templates?name=${encodeURIComponent(name)}`;
+      const url = `https://graph.facebook.com/v25.0/${wabaId}/message_templates?name=${encodeURIComponent(name)}`;
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) return this.templateSlotCache;
       const json = (await response.json()) as {
@@ -521,6 +521,12 @@ export class CommunicationsService {
 
     const templateName = this.env('WHATSAPP_TEMPLATE_NAME');
     const templateLang = this.env('WHATSAPP_TEMPLATE_LANGUAGE') || 'en';
+    const notice = this.templateText(body);
+    const slots = templateName ? await this.templateBodySlots(templateName, templateLang) : 1;
+    const values =
+      slots <= 1
+        ? [notice]
+        : [this.templateText(attendee.fullName), notice];
 
     const payload = templateName
       ? {
@@ -533,10 +539,10 @@ export class CommunicationsService {
             components: [
               {
                 type: 'body',
-                parameters: [
-                  { type: 'text', text: attendee.fullName },
-                  { type: 'text', text: body.slice(0, 120) },
-                ],
+                parameters: Array.from({ length: slots }, (_, index) => ({
+                  type: 'text',
+                  text: values[index] || values[values.length - 1],
+                })),
               },
             ],
           },
@@ -545,11 +551,11 @@ export class CommunicationsService {
           messaging_product: 'whatsapp',
           to,
           type: 'text',
-          text: { body, preview_url: true },
+          text: { body: notice, preview_url: true },
         };
 
     try {
-      const response = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+      const response = await fetch(`https://graph.facebook.com/v25.0/${phoneId}/messages`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -681,11 +687,14 @@ export class CommunicationsService {
   }
 
   private inviteChannels(attendee: Attendee, preferred?: string): DispatchChannel[] {
-    if (preferred) {
-      const mapped = this.mapChannel(preferred);
-      return mapped ? [mapped] : this.availableChannels(attendee);
+    const channels: DispatchChannel[] = [];
+    if (attendee.phone) channels.push(DispatchChannel.WHATSAPP);
+    if (attendee.email) channels.push(DispatchChannel.EMAIL);
+    const mapped = preferred ? this.mapChannel(preferred) : null;
+    if (mapped === DispatchChannel.SMS && attendee.phone && !channels.includes(DispatchChannel.SMS)) {
+      channels.push(DispatchChannel.SMS);
     }
-    return this.availableChannels(attendee);
+    return channels.length ? channels : [DispatchChannel.WHATSAPP];
   }
 
   private availableChannels(attendee: Attendee): DispatchChannel[] {
@@ -778,7 +787,11 @@ export class CommunicationsService {
   }
 
   private frontendUrl() {
-    return this.env('FRONTEND_URL') || 'http://localhost:3000';
+    const configured = (this.env('FRONTEND_URL') || '').replace(/\/$/, '');
+    if (!configured || configured.includes('localhost') || configured.includes('127.0.0.1')) {
+      return 'https://omolaraeniolaos-frontend.vercel.app';
+    }
+    return configured;
   }
 
   private env(key: string) {

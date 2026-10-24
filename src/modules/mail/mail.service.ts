@@ -37,11 +37,30 @@ export class MailService {
   }
 
   private getFromEmail(): string {
-    return (
+    const configured =
       this.configService?.get<string>('RESEND_FROM_EMAIL') ||
       process.env.RESEND_FROM_EMAIL ||
-      'McEniesVite Security <onboarding@resend.dev>'
-    );
+      '';
+    if (!configured || /@example\.com\b/i.test(configured)) {
+      return 'McEniesVite <onboarding@resend.dev>';
+    }
+    return configured;
+  }
+
+  private deliveryTarget(to: string, fromEmail: string) {
+    const inbox = (
+      this.configService?.get<string>('RESEND_TEST_INBOX') ||
+      process.env.RESEND_TEST_INBOX ||
+      ''
+    ).trim();
+    const sandbox = fromEmail.includes('onboarding@resend.dev');
+    if (sandbox && inbox && inbox.toLowerCase() !== to.toLowerCase()) {
+      return {
+        to: inbox,
+        htmlNote: `<p style="font-size:13px;color:#736B66">Development copy. The account address is ${to}.</p>`,
+      };
+    }
+    return { to, htmlNote: '' };
   }
 
   async sendPasswordResetEmail(
@@ -52,6 +71,7 @@ export class MailService {
     const frontendUrl = this.getBaseFrontendUrl();
     const apiKey = this.getApiKey();
     const fromEmail = this.getFromEmail();
+    const delivery = this.deliveryTarget(to, fromEmail);
     const resetUrl = `${frontendUrl}/auth/reset-password?token=${resetToken}`;
 
     this.logger.log(`=========================================`);
@@ -71,7 +91,7 @@ export class MailService {
           },
           body: JSON.stringify({
             from: fromEmail,
-            to: [to],
+            to: [delivery.to],
             subject: 'Reset Your McEniesVite Password',
             html: `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px;">
@@ -118,6 +138,7 @@ export class MailService {
   async sendEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; error?: string }> {
     const apiKey = this.getApiKey();
     const fromEmail = this.getFromEmail();
+    const delivery = this.deliveryTarget(to, fromEmail);
 
     if (!apiKey || apiKey.startsWith('re_xxxx') || apiKey.startsWith('re_1234')) {
       this.logger.log(`[sandbox] Email queued for ${to}: ${subject}`);
@@ -131,7 +152,12 @@ export class MailService {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ from: fromEmail, to: [to], subject, html }),
+        body: JSON.stringify({
+          from: fromEmail,
+          to: [delivery.to],
+          subject,
+          html: `${delivery.htmlNote}${html}`,
+        }),
       });
 
       if (!response.ok) {

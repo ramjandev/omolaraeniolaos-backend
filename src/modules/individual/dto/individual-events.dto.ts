@@ -331,11 +331,45 @@ export class UpdateIndividualGuestDto {
   dietary?: string;
 }
 
+export class CreateSeatingDto {
+  @ApiProperty({ description: 'Table or zone name', example: 'Table - 01' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiPropertyOptional({ description: 'Guest group seated here', example: 'VIP' })
+  @IsString()
+  @IsOptional()
+  guestGroup?: string;
+
+  @ApiPropertyOptional({ description: 'Hall or zone', example: 'Main Hall' })
+  @IsString()
+  @IsOptional()
+  location?: string;
+
+  @ApiProperty({ description: 'Seats at this table', example: 15 })
+  @Type(() => Number)
+  @IsNumber()
+  @IsNotEmpty()
+  capacity: number;
+
+  @ApiPropertyOptional({ description: 'Seats held back from assignment', example: 1 })
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
+  reservedSeats?: number;
+}
+
 export class AssignGuestSeatingDto {
   @ApiProperty({ description: 'Attendee / Guest ID', example: 'g-1' })
   @IsString()
   @IsNotEmpty()
   attendeeId: string;
+
+  @ApiPropertyOptional({ description: 'Table zone id' })
+  @IsString()
+  @IsOptional()
+  zoneId?: string;
 
   @ApiProperty({ description: 'Table Number (e.g. 1)', example: 1 })
   @IsNumber()

@@ -28,6 +28,7 @@ import {
   BulkAddIndividualGuestsDto,
   UpdateIndividualGuestDto,
   AssignGuestSeatingDto,
+  CreateSeatingDto,
   ResolveFlagDto,
   UpdateSetupStepDto,
   InviteGuestDto,
@@ -271,6 +272,40 @@ export class IndividualEventsController {
   // ---------------------------------------------------------------------------
   // SEATING PROTOCOL & TABLE ASSIGNMENTS
   // ---------------------------------------------------------------------------
+
+  @Post(':id/seating')
+  @ResponseMessage('Seating table created successfully')
+  @ApiOperation({
+    summary: '[Individual Organizer] Add a table or seating zone',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiBody({ type: CreateSeatingDto })
+  async createEventSeating(@Param('id') id: string, @Body() dto: CreateSeatingDto) {
+    return this.eventsService.createEventSeating(id, dto);
+  }
+
+  @Patch(':id/seating/:zoneId')
+  @ResponseMessage('Seating table updated successfully')
+  @ApiOperation({ summary: '[Individual Organizer] Update a table' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiParam({ name: 'zoneId', description: 'Table zone UUID' })
+  @ApiBody({ type: CreateSeatingDto })
+  async updateEventSeating(
+    @Param('id') id: string,
+    @Param('zoneId') zoneId: string,
+    @Body() dto: CreateSeatingDto,
+  ) {
+    return this.eventsService.updateEventSeating(id, zoneId, dto);
+  }
+
+  @Delete(':id/seating/:zoneId')
+  @ResponseMessage('Seating table removed successfully')
+  @ApiOperation({ summary: '[Individual Organizer] Remove a table' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiParam({ name: 'zoneId', description: 'Table zone UUID' })
+  async deleteEventSeating(@Param('id') id: string, @Param('zoneId') zoneId: string) {
+    return this.eventsService.deleteEventSeating(id, zoneId);
+  }
 
   @Get(':id/seating')
   @ResponseMessage('Seating blueprint retrieved successfully')

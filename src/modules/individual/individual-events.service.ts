@@ -23,6 +23,7 @@ import {
   BulkAddIndividualGuestsDto,
   UpdateIndividualGuestDto,
   AssignGuestSeatingDto,
+  CreateSeatingDto,
   ResolveFlagDto,
   UpdateSetupStepDto,
   InviteGuestDto,
@@ -585,7 +586,9 @@ export class IndividualEventsService {
         totalGuests: total,
         confirmedCount: confirmed,
         checkedInCount: checkedIn,
-        notArrivedCount: Math.max(0, total - checkedIn),
+        notArrivedCount: attendees.filter(
+          (a) => a.rsvpStatus === RsvpStatus.CONFIRMED && a.status !== AttendeeStatus.CHECKED_IN,
+        ).length,
         flaggedCount: flagged,
       },
     };
@@ -793,6 +796,85 @@ export class IndividualEventsService {
   /**
    * 15. GET SEATING BLUEPRINT & TABLE PROTOCOL
    */
+  async createEventSeating(eventId: string, dto: CreateSeatingDto) {
+    const ev = await this.resolveEvent(eventId);
+    const capacity = Math.max(1, Number(dto.capacity) || 1);
+    const reservedSeats = Math.min(capacity, Math.max(0, Number(dto.reservedSeats) || 0));
+    const meta = {
+      name: dto.name.trim(),
+      guestGroup: dto.guestGroup?.trim() || 'General',
+      location: dto.location?.trim() || '',
+      reservedSeats,
+    };
+    const zone = await this.prisma.tableZone.create({
+      data: {
+        eventId: ev.id,
+        zoneName: JSON.stringify(meta),
+        tableCount: 1,
+        seatPerTable: capacity,
+        totalCapacity: capacity,
+      },
+    });
+    return { id: zone.id, ...meta, capacity };
+  }
+
+  async updateEventSeating(eventId: string, zoneId: string, dto: CreateSeatingDto) {
+    const ev = await this.resolveEvent(eventId);
+    const zone = await this.prisma.tableZone.findFirst({
+      where: { id: zoneId, eventId: ev.id },
+      include: { assignments: { include: { attendee: true } } },
+    });
+    if (!zone) {
+      throw new NotFoundException('Table was not found');
+    }
+    const capacity = Math.max(1, Number(dto.capacity) || 1);
+    const reservedSeats = Math.min(capacity, Math.max(0, Number(dto.reservedSeats) || 0));
+    const nextGroup = dto.guestGroup?.trim() || 'General';
+    const staying = zone.assignments.filter((assignment) =>
+      this.tableAcceptsGuest(nextGroup, assignment.attendee.guestType || 'General'),
+    );
+    const releasedIds = zone.assignments
+      .filter((assignment) => !staying.some((row) => row.id === assignment.id))
+      .map((assignment) => assignment.id);
+    const used = staying.reduce(
+      (sum, assignment) => sum + Math.max(1, assignment.attendee.partySize || 1),
+      0,
+    );
+    if (capacity - reservedSeats < used) {
+      throw new BadRequestException(
+        `This table already has ${used} assigned seat${used === 1 ? '' : 's'}. Leave at least that many seats available.`,
+      );
+    }
+    const meta = {
+      name: dto.name.trim(),
+      guestGroup: nextGroup,
+      location: dto.location?.trim() || '',
+      reservedSeats,
+    };
+    if (releasedIds.length) {
+      await this.prisma.tableAssignment.deleteMany({ where: { id: { in: releasedIds } } });
+    }
+    await this.prisma.tableZone.update({
+      where: { id: zone.id },
+      data: {
+        zoneName: JSON.stringify(meta),
+        seatPerTable: capacity,
+        totalCapacity: capacity,
+      },
+    });
+    return { id: zone.id, ...meta, capacity, releasedGuests: releasedIds.length };
+  }
+
+  async deleteEventSeating(eventId: string, zoneId: string) {
+    const ev = await this.resolveEvent(eventId);
+    const zone = await this.prisma.tableZone.findFirst({ where: { id: zoneId, eventId: ev.id } });
+    if (!zone) {
+      throw new NotFoundException('Table was not found');
+    }
+    await this.prisma.tableZone.delete({ where: { id: zone.id } });
+    return { id: zone.id };
+  }
+
   async getEventSeating(eventId: string) {
     const ev = await this.resolveEvent(eventId);
 
@@ -801,13 +883,16 @@ export class IndividualEventsService {
       include: {
         assignments: {
           include: { attendee: { include: { ticketTier: true } } },
+          orderBy: { seatNumber: 'asc' },
         },
       },
+      orderBy: { createdAt: 'asc' },
     });
 
     const allAttendees = await this.prisma.attendee.findMany({
       where: { eventId: ev.id },
       include: { tableSeat: true, ticketTier: true },
+      orderBy: { fullName: 'asc' },
     });
 
     const unassigned = allAttendees
@@ -815,44 +900,64 @@ export class IndividualEventsService {
       .map((a) => ({
         id: a.id,
         name: a.fullName,
-        type: a.ticketTier?.type === TicketTierType.VIP ? 'VIP' : 'General',
+        type: a.guestType || (a.ticketTier?.type === TicketTierType.VIP ? 'VIP' : 'General'),
         phone: a.phone,
+        partySize: Math.max(1, a.partySize || 1),
         status: a.status,
       }));
 
     const formattedZones = zones.map((z) => {
-      const assignedCount = z.assignments.length;
+      const meta = this.readZoneMeta(z.zoneName);
+      const seatsUsed = z.assignments.reduce(
+        (sum, assignment) => sum + Math.max(1, assignment.attendee.partySize || 1),
+        0,
+      );
       return {
         id: z.id,
-        name: z.zoneName,
+        name: meta.name,
+        guestGroup: meta.guestGroup,
+        location: meta.location,
+        reservedSeats: meta.reservedSeats,
         tableCount: z.tableCount,
         seatPerTable: z.seatPerTable,
         totalCapacity: z.totalCapacity,
-        assignedCount,
-        remainingSeats: Math.max(0, z.totalCapacity - assignedCount),
+        assignedCount: seatsUsed,
+        remainingSeats: Math.max(0, z.totalCapacity - meta.reservedSeats - seatsUsed),
         tables: Array.from({ length: z.tableCount }).map((_, idx) => {
           const tableNum = idx + 1;
           const tableAssignments = z.assignments.filter((as) => as.tableNumber === tableNum);
+          const occupied = tableAssignments.reduce(
+            (sum, assignment) => sum + Math.max(1, assignment.attendee.partySize || 1),
+            0,
+          );
           return {
             tableNumber: tableNum,
-            occupied: tableAssignments.length,
+            occupied,
             capacity: z.seatPerTable,
-            seats: tableAssignments.map((as) => ({
-              seatNumber: as.seatNumber || 1,
-              attendeeId: as.attendeeId,
-              guestName: as.attendee.fullName,
-              tier: as.attendee.ticketTier?.name || 'General',
-            })),
+            seats: tableAssignments.map((as) => {
+              const partySize = Math.max(1, as.attendee.partySize || 1);
+              const seatNumber = as.seatNumber || 1;
+              return {
+                seatNumber,
+                attendeeId: as.attendeeId,
+                guestName: as.attendee.fullName,
+                phone: as.attendee.phone,
+                partySize,
+                tier: as.attendee.guestType || as.attendee.ticketTier?.name || 'General',
+                seatCode: this.seatCode(tableNum, seatNumber, partySize),
+              };
+            }),
           };
         }),
       };
     });
 
+    const seatsUsed = formattedZones.reduce((sum, zone) => sum + zone.assignedCount, 0);
     return {
       eventId: ev.id,
       eventTitle: ev.title,
       totalCapacity: zones.reduce((acc, z) => acc + z.totalCapacity, 0),
-      totalAssigned: zones.reduce((acc, z) => acc + z.assignments.length, 0),
+      totalAssigned: seatsUsed,
       zones: formattedZones,
       unassignedGuests: unassigned,
     };
@@ -863,42 +968,73 @@ export class IndividualEventsService {
    */
   async assignGuestSeating(eventId: string, dto: AssignGuestSeatingDto) {
     const ev = await this.resolveEvent(eventId);
-
-    let zone = await this.prisma.tableZone.findFirst({
-      where: {
-        eventId: ev.id,
-        zoneName: dto.zoneName ? { contains: dto.zoneName, mode: 'insensitive' } : undefined,
-      },
+    const attendee = await this.prisma.attendee.findFirst({
+      where: { id: dto.attendeeId, eventId: ev.id },
     });
+    if (!attendee) {
+      throw new NotFoundException('Guest was not found on this event');
+    }
 
-    if (!zone) {
-      zone = await this.prisma.tableZone.findFirst({ where: { eventId: ev.id } });
+    let zone = dto.zoneId
+      ? await this.prisma.tableZone.findFirst({ where: { id: dto.zoneId, eventId: ev.id } })
+      : null;
+
+    if (!zone && dto.zoneName) {
+      zone = await this.prisma.tableZone.findFirst({
+        where: { eventId: ev.id, zoneName: { contains: dto.zoneName, mode: 'insensitive' } },
+      });
     }
 
     if (!zone) {
-      zone = await this.prisma.tableZone.create({
-        data: {
-          eventId: ev.id,
-          zoneName: dto.zoneName || 'Main Table Zone',
-          tableCount: 10,
-          seatPerTable: 8,
-          totalCapacity: 80,
-        },
-      });
+      throw new BadRequestException('Choose a table before assigning this guest');
+    }
+
+    const tableNumber = dto.tableNumber || 1;
+    if (tableNumber < 1 || tableNumber > zone.tableCount) {
+      throw new BadRequestException('That table is not part of this seating zone');
+    }
+
+    const partySize = Math.max(1, attendee.partySize || 1);
+    const meta = this.readZoneMeta(zone.zoneName);
+    const guestType = attendee.guestType || 'General';
+    if (!this.tableAcceptsGuest(meta.guestGroup, guestType)) {
+      throw new BadRequestException(
+        `${meta.name} seats ${meta.guestGroup} guests only. ${attendee.fullName} is ${guestType}.`,
+      );
+    }
+    const usable = Math.max(0, zone.seatPerTable - meta.reservedSeats);
+    const existing = await this.prisma.tableAssignment.findMany({
+      where: { zoneId: zone.id, tableNumber, attendeeId: { not: attendee.id } },
+      include: { attendee: true },
+    });
+    const taken = new Set<number>();
+    for (const row of existing) {
+      const size = Math.max(1, row.attendee.partySize || 1);
+      const start = row.seatNumber || 1;
+      for (let offset = 0; offset < size; offset += 1) taken.add(start + offset);
+    }
+    let seatNumber = dto.seatNumber;
+    if (!seatNumber || this.rangeTaken(taken, seatNumber, partySize)) {
+      seatNumber = this.firstOpenSeat(taken, partySize, usable);
+    }
+    if (!seatNumber) {
+      throw new BadRequestException(
+        `${meta.name} does not have ${partySize} open seat${partySize === 1 ? '' : 's'} left`,
+      );
     }
 
     const assignment = await this.prisma.tableAssignment.upsert({
       where: { attendeeId: dto.attendeeId },
       update: {
         zoneId: zone.id,
-        tableNumber: dto.tableNumber,
-        seatNumber: dto.seatNumber || 1,
+        tableNumber,
+        seatNumber,
       },
       create: {
         attendeeId: dto.attendeeId,
         zoneId: zone.id,
-        tableNumber: dto.tableNumber,
-        seatNumber: dto.seatNumber || 1,
+        tableNumber,
+        seatNumber,
       },
       include: { attendee: true, zone: true },
     });
@@ -909,7 +1045,7 @@ export class IndividualEventsService {
       guestName: assignment.attendee.fullName,
       table: assignment.tableNumber,
       seat: assignment.seatNumber,
-      zone: assignment.zone.zoneName,
+      zone: this.readZoneMeta(assignment.zone.zoneName).name,
     };
   }
 
@@ -991,8 +1127,14 @@ export class IndividualEventsService {
       eventId: ev.id,
       eventTitle: ev.title,
       metrics: {
+        totalInvitees: attendees.length,
         totalCheckedIn,
         totalExpected,
+        notArrived: attendees.filter(
+          (a) => a.rsvpStatus === RsvpStatus.CONFIRMED && a.status !== AttendeeStatus.CHECKED_IN,
+        ).length,
+        totalAttendance: checkedInList.reduce((sum, guest) => sum + Math.max(1, guest.partySize || 1), 0),
+        flaggedCount: storedFlags.length,
         checkInPercentage: percentage,
         activeTurnstiles: turnstiles.length,
         throughputPerMinute: Math.round((recentScans / 10) * 10) / 10,
@@ -1031,6 +1173,52 @@ export class IndividualEventsService {
           : 'Flag manually resolved by event host.',
       remainingFlagsCount: remaining,
     };
+  }
+
+  private tableAcceptsGuest(tableType: string, guestType: string) {
+    const table = tableType === 'Standard' ? 'Preserved' : tableType || 'General';
+    if (table === 'Preserved') return true;
+    return table === (guestType || 'General');
+  }
+
+  private readZoneMeta(zoneName: string) {
+    if (zoneName.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(zoneName) as {
+          name?: string;
+          guestGroup?: string;
+          location?: string;
+          reservedSeats?: number;
+        };
+        return {
+          name: parsed.name || 'Table',
+          guestGroup: parsed.guestGroup || 'General',
+          location: parsed.location || '',
+          reservedSeats: Math.max(0, Number(parsed.reservedSeats) || 0),
+        };
+      } catch {
+        // Older zones store a plain name.
+      }
+    }
+    return { name: zoneName, guestGroup: 'General', location: '', reservedSeats: 0 };
+  }
+
+  private seatCode(tableNumber: number, start: number, partySize: number) {
+    return Array.from({ length: partySize }, (_, index) => `T${tableNumber}-${String(start + index).padStart(2, '0')}`).join(', ');
+  }
+
+  private rangeTaken(taken: Set<number>, start: number, size: number) {
+    for (let offset = 0; offset < size; offset += 1) {
+      if (taken.has(start + offset)) return true;
+    }
+    return false;
+  }
+
+  private firstOpenSeat(taken: Set<number>, size: number, usable: number) {
+    for (let start = 1; start + size - 1 <= usable; start += 1) {
+      if (!this.rangeTaken(taken, start, size)) return start;
+    }
+    return null;
   }
 
   private mapRsvp(value?: string): RsvpStatus {

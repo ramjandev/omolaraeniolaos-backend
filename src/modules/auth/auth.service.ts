@@ -251,6 +251,11 @@ export class AuthService {
     }
 
     const { passwordHash, ...safeUser } = user;
+    try {
+      await this.reconcilePlanPayments(userId);
+    } catch (err: any) {
+      this.logger.warn(`Plan payment reconcile skipped: ${err.message}`);
+    }
     const planSetting = await this.prisma.platformSetting.findUnique({
       where: { key: `PLAN_USER_${userId}` },
     });

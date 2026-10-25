@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, Optional, NotFoundException, BadRequestException } from '@nestjs/common';
+import * as jwt from 'jsonwebtoken';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
@@ -13,6 +14,8 @@ import {
   InviteGateStaffDto,
   AssignGateStaffDto,
   AssignAllGateStaffDto,
+  UnassignGateStaffDto,
+  RemoveGateStaffDto,
 } from './dto/individual-gate.dto';
 
 @Injectable()
@@ -24,6 +27,76 @@ export class IndividualGateService {
     @Inject(CommunicationsService) private readonly communications: CommunicationsService,
     @Optional() @Inject(MailService) private readonly mailService?: MailService,
   ) {}
+
+  private frontendBase() {
+    const configured = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+    if (!configured || configured.includes('localhost') || configured.includes('127.0.0.1')) {
+      return 'https://omolaraeniolaos-frontend.vercel.app';
+    }
+    return configured;
+  }
+
+  private inviteSecret() {
+    return process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET || 'book-secret-access-key';
+  }
+
+  private signInviteToken(payload: {
+    sub: string;
+    organizerId: string;
+    eventId?: string | null;
+    gateNumber?: string | null;
+  }) {
+    return jwt.sign({ ...payload, type: 'GATE_INVITE' }, this.inviteSecret(), { expiresIn: '7d' });
+  }
+
+  async getInvitation(token: string) {
+    if (!token) {
+      throw new BadRequestException('Open the invitation link from your email');
+    }
+    let payload: jwt.JwtPayload;
+    try {
+      const verified = jwt.verify(token, this.inviteSecret());
+      if (!verified || typeof verified === 'string') {
+        throw new BadRequestException('This invitation link is invalid or expired');
+      }
+      payload = verified;
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('This invitation link is invalid or expired');
+    }
+    if (payload.type !== 'GATE_INVITE' || typeof payload.sub !== 'string') {
+      throw new BadRequestException('This invitation link is invalid or expired');
+    }
+
+    const staff = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, fullName: true, email: true, role: true },
+    });
+    if (!staff || staff.role !== UserRole.GATE) {
+      throw new NotFoundException('This invitation is no longer available');
+    }
+    const organizerId = typeof payload.organizerId === 'string' ? payload.organizerId : '';
+    const organizer = organizerId
+      ? await this.prisma.user.findUnique({ where: { id: organizerId }, select: { fullName: true } })
+      : null;
+    const eventId = typeof payload.eventId === 'string' ? payload.eventId : '';
+    const event = eventId
+      ? await this.prisma.event.findUnique({
+          where: { id: eventId },
+          select: { title: true, startDate: true },
+        })
+      : null;
+
+    return {
+      organizerName: organizer?.fullName || 'Your organizer',
+      eventTitle: event?.title || 'Event not assigned yet',
+      eventDate: event?.startDate ? event.startDate.toISOString() : null,
+      gateNumber: typeof payload.gateNumber === 'string' && payload.gateNumber ? payload.gateNumber : 'Not assigned yet',
+      role: 'Gate Staff',
+      email: staff.email,
+      staffName: staff.fullName,
+    };
+  }
 
   private rosterKey(userId: string) {
     return `GATE_ROSTER_${userId}`;
@@ -43,6 +116,19 @@ export class IndividualGateService {
   private async rememberStaff(userId: string, staffUserId: string) {
     const ids = await this.readRoster(userId);
     if (!ids.includes(staffUserId)) ids.push(staffUserId);
+    await this.prisma.platformSetting.upsert({
+      where: { key: this.rosterKey(userId) },
+      update: { value: JSON.stringify(ids) },
+      create: {
+        key: this.rosterKey(userId),
+        value: JSON.stringify(ids),
+        description: 'Gate staff invited by this organizer',
+      },
+    });
+  }
+
+  private async forgetStaff(userId: string, staffUserId: string) {
+    const ids = (await this.readRoster(userId)).filter((id) => id !== staffUserId);
     await this.prisma.platformSetting.upsert({
       where: { key: this.rosterKey(userId) },
       update: { value: JSON.stringify(ids) },
@@ -91,7 +177,9 @@ export class IndividualGateService {
             staffProfile: {
               include: {
                 shifts: {
-                  where: eventIds.length ? { eventId: { in: eventIds } } : undefined,
+                  where: eventIds.length
+                    ? { eventId: { in: eventIds }, isActive: true }
+                    : { isActive: true },
                   orderBy: { shiftStart: 'desc' },
                   include: { event: { select: { id: true, title: true } } },
                 },
@@ -115,9 +203,10 @@ export class IndividualGateService {
         currentEventId: eventsList[0]?.id ?? null,
         gateNumber: 'All Gates',
         isOwner: true,
+        assignments: [],
       },
       ...dbStaff.map((s) => {
-        const shifts = s.staffProfile?.shifts ?? [];
+        const shifts = (s.staffProfile?.shifts ?? []).filter((shift) => shift.isActive);
         const latestShift = shifts[0];
         const uniqueEvents = new Set(shifts.map((shift) => shift.eventId));
         return {
@@ -132,6 +221,13 @@ export class IndividualGateService {
           currentEventId: latestShift?.event?.id ?? null,
           gateNumber: latestShift?.gateNumber ?? null,
           isOwner: false,
+          assignments: shifts.map((shift) => ({
+            id: shift.id,
+            eventId: shift.eventId,
+            eventTitle: shift.event?.title || 'Event',
+            gateNumber: shift.gateNumber,
+            assignedAt: shift.shiftStart.toISOString(),
+          })),
         };
       }),
     ];
@@ -193,6 +289,18 @@ export class IndividualGateService {
 
     await this.rememberStaff(organizerUserId, staffUser.id);
 
+    const organizer = await this.prisma.user.findUnique({
+      where: { id: organizerUserId },
+      select: { fullName: true },
+    });
+    const inviteToken = this.signInviteToken({
+      sub: staffUser.id,
+      organizerId: organizerUserId,
+      eventId: shift?.eventId || dto.eventId || null,
+      gateNumber: shift?.gateNumber || dto.gateNumber || null,
+    });
+    const inviteUrl = `${this.frontendBase()}/gate-staff/invite?token=${encodeURIComponent(inviteToken)}`;
+
     if (this.mailService) {
       const passwordLine = temporaryPassword
         ? `<p>Temporary password: <strong>${temporaryPassword}</strong></p>`
@@ -200,7 +308,13 @@ export class IndividualGateService {
       await this.mailService.sendEmail(
         email,
         'You are invited as gate staff on McEniesVite',
-        `<p>Hello ${dto.fullName},</p><p>You have been invited to work the gate.</p>${passwordLine}`,
+        [
+          `<p>Hello ${dto.fullName},</p>`,
+          `<p>${organizer?.fullName || 'Your organizer'} has invited you to help manage guest entry.</p>`,
+          passwordLine,
+          `<p><a href="${inviteUrl}">Open your invitation</a></p>`,
+          `<p>Accept the invitation, then sign in with this email and the temporary password.</p>`,
+        ].join(''),
       );
     }
 
@@ -255,6 +369,73 @@ export class IndividualGateService {
   }
 
   /**
+   * Remove one gate staff member from an event.
+   */
+  async unassignStaff(dto: UnassignGateStaffDto, organizerUserId?: string) {
+    if (!organizerUserId) {
+      throw new BadRequestException('Sign in to update gate staff');
+    }
+    const allowed = await this.organizerStaffIds(organizerUserId);
+    if (!allowed.has(dto.staffId)) {
+      throw new BadRequestException('This gate staff member is not on your roster');
+    }
+    await this.assertEventOwnedBy(dto.eventId, organizerUserId);
+    const profile = await this.prisma.gateStaffProfile.findUnique({
+      where: { userId: dto.staffId },
+    });
+    if (!profile) {
+      throw new NotFoundException('Gate staff profile was not found');
+    }
+    const removed = await this.prisma.gateStaffShift.deleteMany({
+      where: { staffId: profile.id, eventId: dto.eventId },
+    });
+    return { removed: removed.count, staffId: dto.staffId, eventId: dto.eventId };
+  }
+
+  /**
+   * Delete a gate staff member from this organizer's roster.
+   */
+  async removeStaff(dto: RemoveGateStaffDto, organizerUserId?: string) {
+    if (!organizerUserId) {
+      throw new BadRequestException('Sign in to update gate staff');
+    }
+    const allowed = await this.organizerStaffIds(organizerUserId);
+    if (!allowed.has(dto.staffId)) {
+      throw new BadRequestException('This gate staff member is not on your roster');
+    }
+    const staffUser = await this.prisma.user.findUnique({
+      where: { id: dto.staffId },
+      include: { staffProfile: true },
+    });
+    if (!staffUser || staffUser.role !== UserRole.GATE) {
+      throw new NotFoundException('Gate staff was not found');
+    }
+
+    const events = await this.prisma.event.findMany({
+      where: { organizerId: organizerUserId },
+      select: { id: true },
+    });
+    if (staffUser.staffProfile && events.length) {
+      await this.prisma.gateStaffShift.deleteMany({
+        where: {
+          staffId: staffUser.staffProfile.id,
+          eventId: { in: events.map((event) => event.id) },
+        },
+      });
+    }
+    await this.forgetStaff(organizerUserId, dto.staffId);
+
+    const remainingShifts = staffUser.staffProfile
+      ? await this.prisma.gateStaffShift.count({ where: { staffId: staffUser.staffProfile.id } })
+      : 0;
+    if (remainingShifts === 0) {
+      await this.prisma.user.delete({ where: { id: staffUser.id } });
+    }
+
+    return { staffId: dto.staffId, deleted: remainingShifts === 0 };
+  }
+
+  /**
    * Assign every gate staff member (or the given subset) to an event.
    */
   async assignAllStaff(dto: AssignAllGateStaffDto, organizerUserId?: string) {
@@ -295,7 +476,7 @@ export class IndividualGateService {
     eventTitle: string,
     gateNumber: string,
   ) {
-    const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/gate-staff/login`;
+    const loginUrl = `${this.frontendBase()}/gate-staff/login`;
     const subject = `You are assigned to ${eventTitle}`;
     const html = [
       `<p>Hello ${user.fullName},</p>`,

@@ -1064,7 +1064,9 @@ export class IndividualEventsService {
     const checkedInList = attendees.filter((a) => a.status === AttendeeStatus.CHECKED_IN);
     const totalExpected = ev.capacity;
     const totalCheckedIn = checkedInList.length;
-    const percentage = Math.round((totalCheckedIn / Math.max(1, totalExpected)) * 100);
+    const percentage = attendees.length
+      ? Math.round((totalCheckedIn / attendees.length) * 100)
+      : 0;
 
     const scanLogs = await this.prisma.gateScanLog.findMany({
       where: { attendee: { eventId: ev.id } },
@@ -1075,19 +1077,29 @@ export class IndividualEventsService {
       orderBy: { scannedAt: 'desc' },
     });
 
-    const liveActivityStream = scanLogs.slice(0, 10).map((log) => ({
+    const offlineScans = await this.prisma.offlineScan.findMany({
+      where: { eventId: ev.id },
+      select: { attendeeId: true, gateTurnstile: true, result: true },
+    });
+    const offlineAttendees = new Set(
+      offlineScans.map((scan) => scan.attendeeId).filter((id): id is string => Boolean(id)),
+    );
+
+    const liveActivityStream = scanLogs.slice(0, 100).map((log) => ({
       id: log.id,
       attendeeName: log.attendee.fullName,
       ticketTier: log.attendee.ticketTier?.name ?? null,
       turnstile: log.gateTurnstile,
       scannedAt: log.scannedAt,
       status: log.scanResult,
+      offlineSynced: offlineAttendees.has(log.attendeeId),
       staffName: log.staff?.user?.fullName ?? null,
     }));
 
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+    const onlineWindow = Date.now() - 15 * 60 * 1000;
 
     const turnstileMap = new Map<string, { scannedToday: number; staff: string | null }>();
     for (const log of scanLogs) {
@@ -1103,6 +1115,31 @@ export class IndividualEventsService {
       staff: t.staff,
     }));
 
+    const shifts = (ev.staffShifts ?? []).filter((shift: { isActive?: boolean }) => shift.isActive !== false);
+    const gateStaff = shifts.map((shift: {
+      id: string;
+      gateNumber: string;
+      staffId: string;
+      staff?: { userId?: string; deviceId?: string | null; user?: { fullName?: string | null } };
+    }) => {
+      const lastScan = scanLogs.find((log) => log.staffId === shift.staffId);
+      const lastScanAt = lastScan?.scannedAt ?? null;
+      const pendingOffline = offlineScans.filter(
+        (scan) => scan.gateTurnstile === shift.gateNumber && scan.result !== 'VALID',
+      ).length;
+      return {
+        id: shift.staff?.userId || shift.staffId,
+        shiftId: shift.id,
+        name: shift.staff?.user?.fullName || 'Gate staff',
+        role: 'Gate Staff',
+        gate: shift.gateNumber,
+        device: shift.staff?.deviceId || 'Gate Terminal',
+        isOnline: Boolean(lastScanAt && lastScanAt.getTime() >= onlineWindow),
+        lastScanAt,
+        pendingOffline,
+      };
+    });
+
     const recentScans = scanLogs.filter((log) => log.scannedAt.getTime() >= tenMinutesAgo).length;
     const activeGateStaff = (ev.staffShifts ?? []).filter((s: any) => s.isActive).length;
 
@@ -1112,20 +1149,42 @@ export class IndividualEventsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const flaggedExceptions = storedFlags.map((flag) => ({
-      flagId: flag.id,
-      attendeeName: flag.attendee.fullName,
-      phone: flag.attendee.phone,
-      reason: flag.reason,
-      turnstile: flag.turnstile,
-      timestamp: flag.createdAt.toISOString(),
-      severity: 'HIGH',
-      status: flag.status,
-    }));
+    const flaggedExceptions = storedFlags.map((flag) => {
+      const scan = scanLogs.find((log) => log.attendeeId === flag.attendeeId);
+      const reason = flag.reason.toLowerCase();
+      const recommendation = reason.includes('duplicate') || reason.includes('already')
+        ? 'Staff is holding guest'
+        : reason.includes('name') || reason.includes('differ')
+          ? 'Staff recommends entry'
+          : 'Review this arrival before admitting the guest';
+      return {
+        flagId: flag.id,
+        attendeeName: flag.attendee.fullName,
+        phone: flag.attendee.phone,
+        reason: flag.reason,
+        turnstile: flag.turnstile,
+        timestamp: flag.createdAt.toISOString(),
+        staffName: scan?.staff?.user?.fullName ?? null,
+        recommendation,
+        severity: 'HIGH',
+        status: flag.status,
+      };
+    });
 
     return {
       eventId: ev.id,
       eventTitle: ev.title,
+      event: {
+        title: ev.title,
+        category: ev.category,
+        venueName: ev.venueName,
+        startDate: ev.startDate,
+        endDate: ev.endDate,
+        timezone: ev.timezone,
+        status: ev.status,
+        coverImageUrl: ev.coverImageUrl,
+      },
+      activityTotal: scanLogs.length,
       metrics: {
         totalInvitees: attendees.length,
         totalCheckedIn,
@@ -1143,6 +1202,7 @@ export class IndividualEventsService {
       liveActivityStream,
       flaggedExceptions,
       turnstiles,
+      gateStaff,
     };
   }
 

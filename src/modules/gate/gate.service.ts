@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, Inject, HttpException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Inject, HttpException, BadRequestException } from '@nestjs/common';
 import { AttendeeStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScanDto } from './dto/scan.dto';
@@ -84,8 +84,11 @@ export class GateService {
         id: updated.id,
         fullName: updated.fullName,
         email: updated.email,
-        ticketTier: updated.ticketTier.name,
-        gateTurnstile: dto.gateTurnstile || 'Gate A-1',
+        guestType: updated.guestType || updated.ticketTier?.name || 'General',
+        partySize: updated.partySize,
+        rsvpStatus: updated.rsvpStatus,
+        ticketTier: updated.ticketTier?.name,
+        gateTurnstile: dto.gateTurnstile || 'Gate 1',
         checkedInAt: updated.checkInTime,
       },
     };
@@ -99,6 +102,119 @@ export class GateService {
         event: { select: { title: true } },
       },
     });
+  }
+
+  /**
+   * Assigned events, recent scans, and profile for the signed-in gate staff member.
+   */
+  async getWorkspace(userId?: string) {
+    if (!userId) {
+      throw new BadRequestException('Sign in as gate staff');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { staffProfile: true },
+    });
+    if (!user) {
+      throw new NotFoundException('Gate staff was not found');
+    }
+
+    const profileId = user.staffProfile?.id;
+    const shifts = profileId
+      ? await this.prisma.gateStaffShift.findMany({
+          where: { staffId: profileId, isActive: true },
+          include: {
+            event: {
+              include: {
+                organizer: { select: { fullName: true } },
+                attendees: { select: { status: true } },
+              },
+            },
+          },
+          orderBy: { shiftStart: 'desc' },
+        })
+      : [];
+
+    const scans = profileId
+      ? await this.prisma.gateScanLog.findMany({
+          where: { staffId: profileId },
+          include: {
+            attendee: { select: { fullName: true, partySize: true, eventId: true, status: true } },
+          },
+          orderBy: { scannedAt: 'desc' },
+          take: 80,
+        })
+      : [];
+
+    return {
+      staff: {
+        id: user.id,
+        profileId: profileId ?? null,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+      },
+      events: shifts.map((shift) => {
+        const guests = shift.event.attendees;
+        const now = Date.now();
+        const ended = shift.event.endDate.getTime() < now;
+        const live = shift.event.status === 'LIVE';
+        return {
+          id: shift.event.id,
+          title: shift.event.title,
+          startDate: shift.event.startDate.toISOString(),
+          gate: shift.gateNumber,
+          organizer: shift.event.organizer?.fullName || 'Organizer',
+          status: ended ? 'Ended' : live ? 'Live' : 'Upcoming',
+          expected: guests.length,
+          checkedIn: guests.filter((guest) => guest.status === AttendeeStatus.CHECKED_IN).length,
+        };
+      }),
+      scans: scans.map((scan) => ({
+        id: scan.id,
+        name: scan.attendee.fullName,
+        partySize: scan.attendee.partySize,
+        eventId: scan.attendee.eventId,
+        gate: scan.gateTurnstile,
+        scannedAt: scan.scannedAt.toISOString(),
+        status: scan.scanResult,
+      })),
+    };
+  }
+
+  async searchGuests(userId: string | undefined, eventId: string, query: string) {
+    const workspace = await this.getWorkspace(userId);
+    const assigned = workspace.events.some((event) => event.id === eventId);
+    if (!assigned) {
+      throw new BadRequestException('You are not assigned to this event');
+    }
+    const term = query.trim();
+    const guests = await this.prisma.attendee.findMany({
+      where: {
+        eventId,
+        ...(term
+          ? {
+              OR: [
+                { fullName: { contains: term, mode: 'insensitive' } },
+                { phone: { contains: term } },
+                { email: { contains: term, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      include: { ticketTier: { select: { name: true } } },
+      orderBy: { fullName: 'asc' },
+      take: 20,
+    });
+    return guests.map((guest) => ({
+      id: guest.id,
+      name: guest.fullName,
+      guestType: guest.guestType || guest.ticketTier?.name || 'General',
+      partySize: guest.partySize,
+      rsvpStatus: guest.rsvpStatus,
+      checkInStatus: guest.status === AttendeeStatus.CHECKED_IN ? 'Checked In' : 'Not Checked In',
+      qrCode: guest.qrCode,
+    }));
   }
 
   async syncOfflineScans(scans: ScanDto[]) {

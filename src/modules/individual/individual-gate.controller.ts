@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Body,
+  Query,
   UseGuards,
   Inject,
 } from '@nestjs/common';
@@ -19,6 +20,8 @@ import {
   InviteGateStaffDto,
   AssignGateStaffDto,
   AssignAllGateStaffDto,
+  UnassignGateStaffDto,
+  RemoveGateStaffDto,
 } from './dto/individual-gate.dto';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -34,6 +37,16 @@ export class IndividualGateController {
     @Inject(IndividualGateService)
     private readonly gateService: IndividualGateService,
   ) {}
+
+  @Get('invitation')
+  @ResponseMessage('Gate staff invitation retrieved')
+  @ApiOperation({
+    summary: '[Public] Preview a gate staff invitation',
+    description: 'Returns the organizer, event, date, and gate for a first-time invitation link.',
+  })
+  async getInvitation(@Query('token') token?: string) {
+    return this.gateService.getInvitation(token || '');
+  }
 
   @Get()
   @ResponseMessage('Gate management roster retrieved successfully')
@@ -84,6 +97,34 @@ export class IndividualGateController {
     @Body() dto: AssignGateStaffDto,
   ) {
     return this.gateService.assignStaff(dto, user?.id);
+  }
+
+  @Post('unassign')
+  @ResponseMessage('Gate assignment removed')
+  @ApiOperation({
+    summary: '[Individual Organizer] Remove a gate staff assignment',
+    description: 'Removes a gate staff member from one event.',
+  })
+  @ApiBody({ type: UnassignGateStaffDto })
+  async unassignStaff(
+    @CurrentUser() user: CurrentUserDto | undefined,
+    @Body() dto: UnassignGateStaffDto,
+  ) {
+    return this.gateService.unassignStaff(dto, user?.id);
+  }
+
+  @Post('remove')
+  @ResponseMessage('Gate staff removed')
+  @ApiOperation({
+    summary: '[Individual Organizer] Delete a gate staff member',
+    description: 'Removes the staff member from the roster, clears their assignments, and deletes the gate account.',
+  })
+  @ApiBody({ type: RemoveGateStaffDto })
+  async removeStaff(
+    @CurrentUser() user: CurrentUserDto | undefined,
+    @Body() dto: RemoveGateStaffDto,
+  ) {
+    return this.gateService.removeStaff(dto, user?.id);
   }
 
   @Post('assign-all')

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, HttpCode, HttpStatus, Inject, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, HttpCode, HttpStatus, Inject, UseGuards, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { GateService } from './gate.service';
@@ -7,6 +7,8 @@ import { ResponseMessage } from '../../common/decorators/response-message.decora
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CurrentUserDto } from '../../common/dto/current-user.dto';
 
 @ApiTags('05 Gate Staff / Scanner')
 @Controller('gate')
@@ -47,6 +49,24 @@ export class GateController {
   @ApiOperation({ summary: 'Sandbox-only sample QR for gate demo (disabled in production)' })
   async samplePass() {
     return this.gateService.samplePass();
+  }
+
+  @Get('workspace')
+  @ResponseMessage('Gate staff workspace retrieved')
+  @ApiOperation({ summary: 'Assigned events and recent scans for the signed-in gate staff member' })
+  async workspace(@CurrentUser() user: CurrentUserDto | undefined) {
+    return this.gateService.getWorkspace(user?.id);
+  }
+
+  @Get('guests')
+  @ResponseMessage('Guests retrieved')
+  @ApiOperation({ summary: 'Search guests on an event assigned to this gate staff member' })
+  async guests(
+    @CurrentUser() user: CurrentUserDto | undefined,
+    @Query('eventId') eventId: string,
+    @Query('q') query?: string,
+  ) {
+    return this.gateService.searchGuests(user?.id, eventId, query || '');
   }
 
   @Get('shifts')

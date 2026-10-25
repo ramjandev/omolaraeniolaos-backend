@@ -66,6 +66,42 @@ export class AssignAllGateStaffDto {
   staffIds?: string[];
 }
 
+export class RemoveGateStaffDto {
+  @ApiProperty({ example: 'staff_101' })
+  @IsString()
+  @IsNotEmpty()
+  staffId: string;
+}
+
+export class UnassignGateStaffDto {
+  @ApiProperty({ example: 'staff_101' })
+  @IsString()
+  @IsNotEmpty()
+  staffId: string;
+
+  @ApiProperty({ example: '1a249d44-8eed-4b88-9f7b-f323952ee599' })
+  @IsString()
+  @IsNotEmpty()
+  eventId: string;
+}
+
+export class GateStaffAssignmentDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  eventId: string;
+
+  @ApiProperty()
+  eventTitle: string;
+
+  @ApiProperty()
+  gateNumber: string;
+
+  @ApiProperty()
+  assignedAt: string;
+}
+
 export class GateStaffMemberItemDto {
   @ApiProperty({ example: 'staff_101' })
   id: string;
@@ -99,6 +135,9 @@ export class GateStaffMemberItemDto {
 
   @ApiProperty({ example: false })
   isOwner: boolean;
+
+  @ApiProperty({ type: [GateStaffAssignmentDto] })
+  assignments: GateStaffAssignmentDto[];
 }
 
 export class GateManagementMetricsDto {

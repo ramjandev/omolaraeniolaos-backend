@@ -1100,6 +1100,7 @@ export class IndividualEventsService {
     startOfToday.setHours(0, 0, 0, 0);
     const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
     const onlineWindow = Date.now() - 15 * 60 * 1000;
+    const presenceWindow = Date.now() - 3 * 60 * 1000;
 
     const turnstileMap = new Map<string, { scannedToday: number; staff: string | null }>();
     for (const log of scanLogs) {
@@ -1120,13 +1121,16 @@ export class IndividualEventsService {
       id: string;
       gateNumber: string;
       staffId: string;
-      staff?: { userId?: string; deviceId?: string | null; user?: { fullName?: string | null } };
+      staff?: { userId?: string; deviceId?: string | null; lastSeenAt?: Date | null; user?: { fullName?: string | null } };
     }) => {
       const lastScan = scanLogs.find((log) => log.staffId === shift.staffId);
       const lastScanAt = lastScan?.scannedAt ?? null;
+      const lastSeenAt = shift.staff?.lastSeenAt ?? null;
       const pendingOffline = offlineScans.filter(
         (scan) => scan.gateTurnstile === shift.gateNumber && scan.result !== 'VALID',
       ).length;
+      const recentlyScanned = Boolean(lastScanAt && lastScanAt.getTime() >= onlineWindow);
+      const appOpen = Boolean(lastSeenAt && lastSeenAt.getTime() >= presenceWindow);
       return {
         id: shift.staff?.userId || shift.staffId,
         shiftId: shift.id,
@@ -1134,8 +1138,9 @@ export class IndividualEventsService {
         role: 'Gate Staff',
         gate: shift.gateNumber,
         device: shift.staff?.deviceId || 'Gate Terminal',
-        isOnline: Boolean(lastScanAt && lastScanAt.getTime() >= onlineWindow),
+        isOnline: recentlyScanned || appOpen,
         lastScanAt,
+        lastSeenAt,
         pendingOffline,
       };
     });

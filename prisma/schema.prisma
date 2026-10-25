@@ -672,8 +672,9 @@ model GateStaffProfile {
   id       String  @id @default(cuid())
   userId   String  @unique
   user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  gateCode String  @default("GATE-1")
-  deviceId String?
+  gateCode   String    @default("GATE-1")
+  deviceId   String?
+  lastSeenAt DateTime?
 
   shifts GateStaffShift[]
   scans  GateScanLog[]

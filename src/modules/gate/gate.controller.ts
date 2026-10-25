@@ -31,8 +31,8 @@ export class GateController {
   @ApiResponse({ status: 200, description: 'Ticket successfully verified and checked in' })
   @ApiResponse({ status: 404, description: 'Ticket not found / invalid QR' })
   @ApiResponse({ status: 409, description: 'Duplicate scan: already checked in' })
-  async verify(@Body() dto: ScanDto) {
-    return this.gateService.verify(dto);
+  async verify(@Body() dto: ScanDto, @CurrentUser() user: CurrentUserDto | undefined) {
+    return this.gateService.verify(dto, user?.id);
   }
 
   @Post('sync')
@@ -40,8 +40,16 @@ export class GateController {
   @ResponseMessage('Offline scans synced')
   @ApiOperation({ summary: 'Replay QR scans captured while the gate device was offline' })
   @ApiBody({ type: SyncScansDto })
-  async sync(@Body() dto: SyncScansDto) {
-    return this.gateService.syncOfflineScans(dto.scans || []);
+  async sync(@Body() dto: SyncScansDto, @CurrentUser() user: CurrentUserDto | undefined) {
+    return this.gateService.syncOfflineScans(dto.scans || [], user?.id);
+  }
+
+  @Post('presence')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Gate staff presence updated')
+  @ApiOperation({ summary: 'Mark the signed-in gate staff phone as online' })
+  async presence(@CurrentUser() user: CurrentUserDto | undefined) {
+    return this.gateService.markPresence(user?.id);
   }
 
   @Get('sample-pass')

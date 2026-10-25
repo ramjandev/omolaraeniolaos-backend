@@ -7,7 +7,8 @@ import { ScanDto } from './dto/scan.dto';
 export class GateService {
   constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
-  async verify(dto: ScanDto) {
+  async verify(dto: ScanDto, userId?: string) {
+    const actor = await this.staffContext(userId, dto.staffId, dto.gateTurnstile);
     const attendee = await this.prisma.attendee.findUnique({
       where: { qrCode: dto.qrCode },
       include: {
@@ -27,9 +28,9 @@ export class GateService {
       await this.prisma.gateScanLog.create({
         data: {
           attendeeId: attendee.id,
-          staffId: dto.staffId,
+          staffId: actor.staffId,
           scanResult: 'DUPLICATE',
-          gateTurnstile: dto.gateTurnstile || 'Gate A-1',
+          gateTurnstile: actor.gateTurnstile,
         },
       });
       await this.prisma.checkInException.create({
@@ -37,7 +38,7 @@ export class GateService {
           eventId: attendee.eventId,
           attendeeId: attendee.id,
           reason: 'Duplicate Pass Scanned',
-          turnstile: dto.gateTurnstile || 'Gate A-1',
+          turnstile: actor.gateTurnstile,
         },
       });
       await this.prisma.attendee.update({
@@ -63,7 +64,7 @@ export class GateService {
       data: {
         status: AttendeeStatus.CHECKED_IN,
         checkInTime: scannedAt,
-        checkedInBy: dto.staffId || 'Turnstile Scanner',
+        checkedInBy: actor.staffId || 'Turnstile Scanner',
       },
       include: { ticketTier: true },
     });
@@ -71,9 +72,9 @@ export class GateService {
     await this.prisma.gateScanLog.create({
       data: {
         attendeeId: attendee.id,
-        staffId: dto.staffId,
+        staffId: actor.staffId,
         scanResult: 'VALID',
-        gateTurnstile: dto.gateTurnstile || 'Gate A-1',
+        gateTurnstile: actor.gateTurnstile,
       },
     });
 
@@ -88,10 +89,54 @@ export class GateService {
         partySize: updated.partySize,
         rsvpStatus: updated.rsvpStatus,
         ticketTier: updated.ticketTier?.name,
-        gateTurnstile: dto.gateTurnstile || 'Gate 1',
+        gateTurnstile: actor.gateTurnstile,
         checkedInAt: updated.checkInTime,
       },
     };
+  }
+
+  /**
+   * The signed-in gate account, and their assigned gate when the scanner
+   * did not send one. Also records that this phone is open.
+   */
+  private async staffContext(userId?: string, staffId?: string, gate?: string) {
+    let profile = staffId
+      ? await this.prisma.gateStaffProfile.findFirst({
+          where: { OR: [{ id: staffId }, { userId: staffId }] },
+        })
+      : null;
+    if (!profile && userId) {
+      profile = await this.prisma.gateStaffProfile.findUnique({ where: { userId } });
+    }
+    let gateTurnstile = gate;
+    if (
+      profile &&
+      (!gateTurnstile || gateTurnstile === 'Gate 1' || gateTurnstile === 'Gate A-1' || gateTurnstile === 'A-1')
+    ) {
+      const shift = await this.prisma.gateStaffShift.findFirst({
+        where: { staffId: profile.id, isActive: true },
+        orderBy: { shiftStart: 'desc' },
+      });
+      if (shift) gateTurnstile = shift.gateNumber;
+    }
+    if (profile) {
+      await this.prisma.gateStaffProfile.update({
+        where: { id: profile.id },
+        data: { lastSeenAt: new Date() },
+      });
+    }
+    return { staffId: profile?.id, gateTurnstile: gateTurnstile || 'Gate 1' };
+  }
+
+  async markPresence(userId?: string) {
+    if (!userId) return { online: false };
+    const profile = await this.prisma.gateStaffProfile.findUnique({ where: { userId } });
+    if (!profile) return { online: false };
+    await this.prisma.gateStaffProfile.update({
+      where: { id: profile.id },
+      data: { lastSeenAt: new Date() },
+    });
+    return { online: true };
   }
 
   async getShifts() {
@@ -117,6 +162,12 @@ export class GateService {
     });
     if (!user) {
       throw new NotFoundException('Gate staff was not found');
+    }
+    if (user.staffProfile) {
+      await this.prisma.gateStaffProfile.update({
+        where: { id: user.staffProfile.id },
+        data: { lastSeenAt: new Date() },
+      });
     }
 
     const profileId = user.staffProfile?.id;
@@ -217,11 +268,11 @@ export class GateService {
     }));
   }
 
-  async syncOfflineScans(scans: ScanDto[]) {
+  async syncOfflineScans(scans: ScanDto[], userId?: string) {
     const results = [];
     for (const scan of scans) {
       try {
-        const data = await this.verify(scan);
+        const data = await this.verify(scan, userId);
         await this.prisma.offlineScan.upsert({
           where: { clientScanId: scan.clientScanId || `${scan.qrCode}-${scan.scannedAt}` },
           update: { result: 'VALID', syncedAt: new Date() },

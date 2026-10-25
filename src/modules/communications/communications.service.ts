@@ -269,6 +269,25 @@ export class CommunicationsService {
         venueName: true,
       },
     });
+    const seat = await this.prisma.tableAssignment.findUnique({
+      where: { attendeeId: attendee.id },
+      include: { zone: true },
+    });
+    let tableName = 'Not assigned';
+    let seatLabel = '';
+    if (seat) {
+      try {
+        const meta = JSON.parse(seat.zone.zoneName) as { name?: string };
+        tableName = meta.name || seat.zone.zoneName;
+      } catch {
+        tableName = seat.zone.zoneName;
+      }
+      const start = seat.seatNumber || 1;
+      const count = Math.max(1, attendee.partySize || 1);
+      seatLabel = Array.from({ length: count }, (_, index) => (
+        `T${seat.tableNumber}-${String(start + index).padStart(2, '0')}`
+      )).join(', ');
+    }
 
     return {
       attendeeId: attendee.id,
@@ -284,6 +303,9 @@ export class CommunicationsService {
       dietaryPreference: attendee.dietaryPreference,
       language: attendee.language,
       guestType: attendee.guestType,
+      notes: attendee.notes,
+      tableName,
+      seatLabel,
       event,
     };
   }

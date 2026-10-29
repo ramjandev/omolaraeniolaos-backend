@@ -40,7 +40,7 @@ function percentChange(current: number, previous: number) {
 }
 
 function bookingStatus(status: BookingStatus | EventStatus): DashboardStatus {
-  if (status === BookingStatus.CANCELLED || status === EventStatus.CANCELLED) return 'Cancelled';
+  if (status === BookingStatus.CANCELLED) return 'Cancelled';
   if (status === BookingStatus.PENDING || status === EventStatus.DRAFT) return 'Awaiting';
   return 'Confirmed';
 }
@@ -629,7 +629,7 @@ export class VenueService {
     const categoryTotal = current.length || 1;
 
     return {
-      periodLabel: `Last ${span} month${span === 1 ? '' : 's'}`,
+      periodLabel: `Last ${span} months`,
       spaces: (venue?.spaces ?? []).map((space) => ({ id: space.id, name: space.name })),
       metrics: {
         totalBookings: current.length,

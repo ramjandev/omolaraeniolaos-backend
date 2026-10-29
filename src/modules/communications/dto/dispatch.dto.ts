@@ -5,7 +5,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
 } from 'class-validator';
 
 export enum DispatchChannel {
@@ -16,7 +15,8 @@ export enum DispatchChannel {
 
 export class DispatchMessageDto {
   @ApiProperty()
-  @IsUUID()
+  @IsString()
+  @IsNotEmpty()
   eventId: string;
 
   @ApiPropertyOptional({ type: [String] })

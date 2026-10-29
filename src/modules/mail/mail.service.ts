@@ -48,16 +48,16 @@ export class MailService {
   }
 
   private deliveryTarget(to: string, fromEmail: string) {
+    const sandbox = fromEmail.includes('onboarding@resend.dev');
     const inbox = (
       this.configService?.get<string>('RESEND_TEST_INBOX') ||
       process.env.RESEND_TEST_INBOX ||
-      ''
+      (sandbox ? 'mdramjan.ict@gmail.com' : '')
     ).trim();
-    const sandbox = fromEmail.includes('onboarding@resend.dev');
     if (sandbox && inbox && inbox.toLowerCase() !== to.toLowerCase()) {
       return {
         to: inbox,
-        htmlNote: `<p style="font-size:13px;color:#736B66">Development copy. The account address is ${to}.</p>`,
+        htmlNote: `<p style="font-size:13px;color:#736B66">Testing copy for ${to}. The Resend onboarding sender can only deliver to this inbox until a domain is verified.</p>`,
       };
     }
     return { to, htmlNote: '' };

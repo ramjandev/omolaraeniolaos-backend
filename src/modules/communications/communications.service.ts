@@ -611,7 +611,7 @@ export class CommunicationsService {
     return {
       channel: DispatchChannel.EMAIL,
       status: result.ok ? 'sent' : 'failed',
-      to,
+      to: result.deliveredTo || to,
       deliveredTo: result.deliveredTo,
       error: result.ok ? undefined : result.error,
     };

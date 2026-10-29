@@ -32,6 +32,7 @@ import {
   ResolveFlagDto,
   UpdateSetupStepDto,
   InviteGuestDto,
+  SendInvitationsDto,
 } from './dto/individual-events.dto';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -234,8 +235,8 @@ export class IndividualEventsController {
     summary: '[Individual Organizer] Send invitations to every guest who has not been invited',
   })
   @ApiParam({ name: 'id', description: 'Event UUID' })
-  async sendAllInvites(@Param('id') id: string) {
-    return this.eventsService.sendAllInvites(id);
+  async sendAllInvites(@Param('id') id: string, @Body() dto?: SendInvitationsDto) {
+    return this.eventsService.sendAllInvites(id, dto?.guestIds);
   }
 
   @Post(':id/guests/:guestId/invite')

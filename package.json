@@ -6,8 +6,8 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "node api.js && prisma generate && prisma db push --accept-data-loss && nest build",
-    "dev": "node api.js && tsx watch src/main.ts",
+    "build": "node  && prisma generate && prisma db push --accept-data-loss && nest build",
+    "dev": "node  && tsx watch src/main.ts",
     "start:dev": "tsx watch src/main.ts",
     "nest:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",

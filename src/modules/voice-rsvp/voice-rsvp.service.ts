@@ -5,7 +5,7 @@ import {
   NotFoundException,
   Inject,
 } from '@nestjs/common';
-import { AttendeeStatus } from '@prisma/client';
+import { AttendeeStatus, RsvpStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TranscribeVoiceDto } from './dto/transcribe-voice.dto';
 
@@ -19,85 +19,179 @@ export interface RsvpIntentResult {
 @Injectable()
 export class VoiceRsvpService {
   private readonly logger = new Logger(VoiceRsvpService.name);
-  private readonly apiKey: string;
 
-  constructor(@Inject(PrismaService) private prisma: PrismaService) {
-    this.apiKey = process.env.GCP_SPEECH_API_KEY || '';
+  constructor(@Inject(PrismaService) private prisma: PrismaService) {}
+
+  private geminiKey() {
+    return (process.env.GEMINI_API_KEY || '').trim();
+  }
+
+  private audioMime(mimeType: string) {
+    const base = (mimeType || 'audio/webm').split(';')[0].trim().toLowerCase();
+    if (base === 'audio/mp4' || base === 'audio/m4a' || base === 'audio/x-m4a') return 'audio/mp4';
+    if (base === 'audio/mpeg' || base === 'audio/mp3') return 'audio/mp3';
+    if (base === 'audio/wav' || base === 'audio/x-wav' || base === 'audio/wave') return 'audio/wav';
+    if (base === 'audio/ogg' || base === 'audio/opus') return 'audio/ogg';
+    return 'audio/webm';
+  }
+
+  private languageHint(languageCode?: string) {
+    const value = (languageCode || '').toLowerCase();
+    if (value.startsWith('yo')) return 'yo-NG';
+    if (value.startsWith('ig')) return 'ig-NG';
+    if (value.startsWith('ha')) return 'ha-NG';
+    if (value.startsWith('en')) return 'en-US';
+    return '';
   }
 
   /**
-   * 1. Google Cloud Speech-to-Text Recognition
+   * Transcribe a short guest voice note with the Gemini free tier.
    */
   async transcribeAudio(
     audioBase64: string,
-    mimeType: string = 'audio/ogg',
+    mimeType: string = 'audio/webm',
     languageCode: string = 'en-US',
   ): Promise<{ transcript: string; confidence: number; languageDetected: string }> {
     if (!audioBase64 || audioBase64.trim().length === 0) {
       throw new BadRequestException('audioBase64 payload is empty');
     }
 
-    // Strip data URI scheme prefix if present (e.g. data:audio/ogg;base64,...)
-    const cleanBase64 = audioBase64.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, '');
-
-    // Map mimeType to Google Cloud Speech encoding
-    let encoding = 'OGG_OPUS';
-    let sampleRateHertz = 16000;
-
-    if (mimeType.includes('wav')) {
-      encoding = 'LINEAR16';
-    } else if (mimeType.includes('mp3')) {
-      encoding = 'MP3';
-    } else if (mimeType.includes('webm')) {
-      encoding = 'WEBM_OPUS';
+    const apiKey = this.geminiKey();
+    if (!apiKey) {
+      throw new BadRequestException('Voice transcription is not configured');
     }
 
-    // Attempt Google Cloud Speech-to-Text v1/v2 REST call if key configured
-    if (this.apiKey) {
-      try {
-        const url = `https://speech.googleapis.com/v1/speech:recognize?key=${this.apiKey}`;
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            config: {
-              encoding,
-              sampleRateHertz,
-              languageCode: languageCode || 'en-US',
-              alternativeLanguageCodes: ['yo-NG', 'ig-NG', 'ha-NG', 'pcm-NG', 'en-GB'],
-              enableAutomaticPunctuation: true,
-            },
-            audio: {
-              content: cleanBase64,
-            },
-          }),
-        });
-
-        const data = await response.json();
-
-        if (response.ok && data.results && data.results.length > 0) {
-          const firstResult = data.results[0];
-          const bestAlt = firstResult.alternatives?.[0];
-          return {
-            transcript: bestAlt?.transcript || '',
-            confidence: bestAlt?.confidence || 0.95,
-            languageDetected: firstResult.languageCode || languageCode,
-          };
-        } else {
-          this.logger.warn(`GCP Speech API response: ${JSON.stringify(data)}`);
-        }
-      } catch (err: any) {
-        this.logger.error(`GCP Speech-to-Text request error: ${err.message}`);
-      }
+    const cleanBase64 = audioBase64.replace(/^data:audio\/[a-zA-Z0-9.+-]+;base64,/, '');
+    const audio = Buffer.from(cleanBase64, 'base64');
+    if (!audio.length) {
+      throw new BadRequestException('Audio recording is empty');
     }
 
-    // Graceful fallback audio speech decoder for development / testing without billing key
+    const mime = this.audioMime(mimeType);
+    const hint = this.languageHint(languageCode);
+    const transcript = await this.geminiTranscribe(apiKey, audio, mime, hint);
+    if (!transcript) {
+      throw new BadRequestException('No speech was detected in that recording');
+    }
+
     return {
-      transcript:
-        'Thank you so much for the invitation. I will definitely be attending the gala event with my wife. Please reserve two seats for us. Looking forward to celebrating!',
-      confidence: 0.98,
-      languageDetected: languageCode || 'en-US',
+      transcript,
+      confidence: 0,
+      languageDetected: hint || languageCode || 'auto',
     };
+  }
+
+  private async geminiTranscribe(apiKey: string, audio: Buffer, mime: string, languageCode: string) {
+    const uploaded = await this.uploadGeminiAudio(apiKey, audio, mime);
+    const first = await this.requestTranscript(apiKey, uploaded.uri, uploaded.mime, languageCode);
+    if (first.ok) return first.transcript;
+    if (languageCode && /language/i.test(first.error)) {
+      const retry = await this.requestTranscript(apiKey, uploaded.uri, uploaded.mime, '');
+      if (retry.ok) return retry.transcript;
+      throw new BadRequestException(retry.error || 'Voice transcription failed');
+    }
+    throw new BadRequestException(first.error || 'Voice transcription failed');
+  }
+
+  private async uploadGeminiAudio(apiKey: string, audio: Buffer, mime: string) {
+    const response = await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files', {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'X-Goog-Upload-Protocol': 'raw',
+        'X-Goog-Upload-Command': 'start, upload, finalize',
+        'X-Goog-Upload-Header-Content-Length': String(audio.length),
+        'X-Goog-Upload-Header-Content-Type': mime,
+        'Content-Type': mime,
+      },
+      body: new Uint8Array(audio),
+    });
+    const raw = await response.text();
+    if (!response.ok) {
+      this.logger.warn(`Gemini file upload failed: ${raw.slice(0, 240)}`);
+      throw new BadRequestException(this.readGeminiError(raw));
+    }
+    const parsed = this.readJson(raw) as { file?: { uri?: string; mimeType?: string }; uri?: string; mimeType?: string };
+    const uri = parsed.file?.uri || parsed.uri;
+    if (!uri) {
+      throw new BadRequestException('Voice file was uploaded without a file address');
+    }
+    return { uri, mime: parsed.file?.mimeType || parsed.mimeType || mime };
+  }
+
+  private async requestTranscript(apiKey: string, uri: string, mime: string, languageCode: string) {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gemini-3.5-transcribe',
+        input: [{ type: 'audio', uri, mime_type: mime }],
+        generation_config: {
+          transcription_config: {
+            language_codes: languageCode ? [languageCode] : [],
+          },
+        },
+      }),
+    });
+    const raw = await response.text();
+    if (!response.ok) {
+      this.logger.warn(`Gemini transcription failed: ${raw.slice(0, 240)}`);
+      return { ok: false as const, transcript: '', error: this.readGeminiError(raw) };
+    }
+    const transcript = this.readTranscript(this.readJson(raw)).trim();
+    return { ok: true as const, transcript, error: '' };
+  }
+
+  private readJson(raw: string) {
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      return {};
+    }
+  }
+
+  private readTranscript(payload: unknown): string {
+    if (!payload || typeof payload !== 'object') return '';
+    const record = payload as {
+      output_text?: string;
+      outputText?: string;
+      outputs?: unknown;
+      steps?: Array<{ type?: string; content?: unknown; text?: string }>;
+    };
+    if (typeof record.output_text === 'string' && record.output_text.trim()) return record.output_text;
+    if (typeof record.outputText === 'string' && record.outputText.trim()) return record.outputText;
+
+    const collect = (value: unknown, chunks: string[]) => {
+      if (!value) return;
+      if (typeof value === 'string') {
+        chunks.push(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((item) => collect(item, chunks));
+        return;
+      }
+      if (typeof value === 'object') {
+        const item = value as { text?: string; content?: unknown };
+        if (typeof item.text === 'string') chunks.push(item.text);
+        if (item.content) collect(item.content, chunks);
+      }
+    };
+
+    const steps = Array.isArray(record.steps) ? record.steps : [];
+    const spoken = steps.filter((step) => step.type === 'model_output');
+    const chunks: string[] = [];
+    collect(spoken.length ? spoken : record.outputs, chunks);
+    return chunks.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  private readGeminiError(raw: string) {
+    const parsed = this.readJson(raw) as { error?: { message?: string }; message?: string };
+    const message = parsed.error?.message || parsed.message || raw;
+    return String(message).replace(/\s+/g, ' ').slice(0, 240);
   }
 
   /**
@@ -203,8 +297,13 @@ export class VoiceRsvpService {
 
       if (attendee) {
         let mappedStatus: AttendeeStatus = AttendeeStatus.ATTENDING;
+        let mappedRsvp: RsvpStatus = RsvpStatus.CONFIRMED;
         if (intent.status === 'DECLINED') {
           mappedStatus = AttendeeStatus.CANCELLED;
+          mappedRsvp = RsvpStatus.DECLINED;
+        } else if (intent.status === 'TENTATIVE') {
+          mappedStatus = AttendeeStatus.PENDING;
+          mappedRsvp = RsvpStatus.TENTATIVE;
         }
 
         const updatedNotes = [
@@ -219,6 +318,9 @@ export class VoiceRsvpService {
           where: { id: attendee.id },
           data: {
             status: mappedStatus,
+            rsvpStatus: mappedRsvp,
+            partySize: intent.guestCount,
+            dietaryPreference: intent.dietaryOrNotes || attendee.dietaryPreference,
             notes: updatedNotes,
           },
         });

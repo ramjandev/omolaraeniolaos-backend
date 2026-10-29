@@ -135,7 +135,11 @@ export class MailService {
     return true;
   }
 
-  async sendEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; error?: string }> {
+  async sendEmail(
+    to: string,
+    subject: string,
+    html: string,
+  ): Promise<{ ok: boolean; error?: string; deliveredTo?: string }> {
     const apiKey = this.getApiKey();
     const fromEmail = this.getFromEmail();
     const delivery = this.deliveryTarget(to, fromEmail);
@@ -167,7 +171,7 @@ export class MailService {
         return { ok: false, error };
       }
 
-      return { ok: true };
+      return { ok: true, deliveredTo: delivery.to };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown mail error';
       this.logger.error(`Error sending email via Resend: ${message}`);

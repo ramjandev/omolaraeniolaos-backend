@@ -62,6 +62,38 @@ export class AdminDashboardController {
     return this.adminService.getDashboardActiveEvents(page, limit, search);
   }
 
+  @Get('events')
+  @ResponseMessage('Admin events retrieved successfully')
+  @ApiOperation({
+    summary: '[Admin Only] Paginated events across organizers, with status, organizer type, and event type filters',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'status', required: false, type: String, example: 'Active' })
+  @ApiQuery({ name: 'organizerType', required: false, type: String, example: 'Individual' })
+  @ApiQuery({ name: 'eventType', required: false, type: String })
+  @ApiQuery({ name: 'sort', required: false, type: String, example: 'date' })
+  async getEvents(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('organizerType') organizerType?: string,
+    @Query('eventType') eventType?: string,
+    @Query('sort') sort?: string,
+  ) {
+    return this.adminService.getAdminEventsList({
+      page,
+      limit,
+      search,
+      status,
+      organizerType,
+      eventType,
+      sort,
+    });
+  }
+
   @Get('events/:id')
   @ResponseMessage('Admin single event details retrieved successfully')
   @ApiOperation({

@@ -7,6 +7,7 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
+  sv?: number;
 }
 
 @Injectable()
@@ -37,6 +38,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (!user || user.status !== 'ACTIVE') {
       throw new UnauthorizedException('User account inactive or not found');
+    }
+
+    const session = await this.prisma.platformSetting.findUnique({
+      where: { key: `SESSION_${payload.sub}` },
+    });
+    const currentVersion = Number(session?.value);
+    const tokenVersion = Number(payload.sv ?? 0);
+    if ((Number.isFinite(currentVersion) ? currentVersion : 0) !== tokenVersion) {
+      throw new UnauthorizedException('This session has ended. Sign in again.');
     }
 
     return user;

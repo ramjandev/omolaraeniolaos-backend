@@ -7,15 +7,15 @@ export class CreateClientDto {
   @IsNotEmpty()
   name: string;
 
-  @ApiProperty({ example: 'Corporate & Media' })
+  @ApiProperty({ example: 'Oak & Ivory', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  industry: string;
+  industry?: string;
 
-  @ApiProperty({ example: 'Folake Adeyemi' })
+  @ApiProperty({ example: 'Folake Adeyemi', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  contactPerson: string;
+  contactPerson?: string;
 
   @ApiProperty({ example: 'folake@zenithmedia.com' })
   @IsEmail()
@@ -26,13 +26,51 @@ export class CreateClientDto {
   @IsOptional()
   contactPhone?: string;
 
-  @ApiProperty({ example: 4500000, default: 0, type: Number })
+  @ApiProperty({ example: 4500000, default: 0, type: Number, required: false })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  contractTotal: number;
+  contractTotal?: number;
 
   @ApiProperty({ example: 'NGN', default: 'NGN' })
   @IsString()
   @IsOptional()
   currency?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+export class UpdateClientDto {
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  industry?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  contactPerson?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsEmail()
+  contactEmail?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

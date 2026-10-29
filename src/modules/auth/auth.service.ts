@@ -24,6 +24,7 @@ import { RegisterOrganizerIndividualDto } from './dto/register-organizer-individ
 import { RegisterOrganizerAgencyDto } from './dto/register-organizer-agency.dto';
 import { RegisterOrganizerVenueDto } from './dto/register-organizer-venue.dto';
 import { PayPlanDto } from './dto/pay-plan.dto';
+import { UpdateProfileDto } from './dto/account-settings.dto';
 
 export interface ResolvedPlan {
   id: string;
@@ -132,6 +133,11 @@ export class AuthService {
       throw new UnauthorizedException('Your account has been deactivated or suspended');
     }
 
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { updatedAt: new Date() },
+    });
+
     const tokens = await this.generateTokens(user.id, user.email, user.role);
 
     return {
@@ -149,12 +155,17 @@ export class AuthService {
 
   async refreshToken(dto: RefreshTokenDto): Promise<TokenResponseDto> {
     try {
-      const payload = await this.jwtService.verifyAsync(dto.refreshToken, {
+      const payload = await this.jwtService.verifyAsync<{ sub?: string; sv?: number }>(dto.refreshToken, {
         secret: this.refreshSecret,
       });
 
       if (!payload || !payload.sub) {
         throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      const currentVersion = await this.currentSessionVersion(payload.sub);
+      if (Number(payload.sv ?? 0) !== currentVersion) {
+        throw new UnauthorizedException('This session has ended. Sign in again.');
       }
 
       const user = await this.prisma.user.findUnique({
@@ -286,12 +297,47 @@ export class AuthService {
     return { ...safeUser, plan };
   }
 
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const current = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!current) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const email = dto.email.trim().toLowerCase();
+    const taken = await this.prisma.user.findFirst({
+      where: { email, NOT: { id: userId } },
+      select: { id: true },
+    });
+    if (taken) {
+      throw new ConflictException('An account with this email already exists');
+    }
+
+    if (dto.avatarUrl && dto.avatarUrl.length > 800_000) {
+      throw new BadRequestException('Profile picture must be under 800KB');
+    }
+
+    const emailChanged = current.email.toLowerCase() !== email;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        fullName: dto.fullName.trim(),
+        email,
+        phone: dto.phone?.trim() || null,
+        ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl || null } : {}),
+        ...(emailChanged ? { emailVerified: null } : {}),
+      },
+    });
+
+    return this.getProfile(userId);
+  }
+
   private async generateTokens(
     userId: string,
     email: string,
     role: string,
   ): Promise<TokenResponseDto> {
-    const payload = { sub: userId, email, role };
+    const sessionVersion = await this.currentSessionVersion(userId);
+    const payload = { sub: userId, email, role, sv: sessionVersion };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
@@ -308,6 +354,148 @@ export class AuthService {
       accessToken,
       refreshToken,
     };
+  }
+
+  private sessionKey(userId: string) {
+    return `SESSION_${userId}`;
+  }
+
+  private notificationKey(userId: string) {
+    return `NOTIFY_${userId}`;
+  }
+
+  private async currentSessionVersion(userId: string) {
+    const row = await this.prisma.platformSetting.findUnique({
+      where: { key: this.sessionKey(userId) },
+    });
+    const value = Number(row?.value);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  private async bumpSessionVersion(userId: string) {
+    const next = (await this.currentSessionVersion(userId)) + 1;
+    await this.prisma.platformSetting.upsert({
+      where: { key: this.sessionKey(userId) },
+      update: { value: String(next) },
+      create: {
+        key: this.sessionKey(userId),
+        value: String(next),
+        description: 'Invalidates older sign-in sessions',
+      },
+    });
+    return next;
+  }
+
+  private defaultNotifications() {
+    return {
+      rsvpUpdates: true,
+      guestReminders: true,
+      eventUpdates: true,
+      billingNotifications: true,
+    };
+  }
+
+  async getAccountSettings(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, emailVerified: true },
+    });
+    if (!user) throw new UnauthorizedException('User not found');
+    const stored = await this.prisma.platformSetting.findUnique({
+      where: { key: this.notificationKey(userId) },
+    });
+    const notifications = this.defaultNotifications();
+    if (stored?.value) {
+      try {
+        const parsed = JSON.parse(stored.value) as Partial<typeof notifications>;
+        for (const key of Object.keys(notifications) as Array<keyof typeof notifications>) {
+          if (typeof parsed[key] === 'boolean') notifications[key] = parsed[key];
+        }
+      } catch {
+        // Keep the defaults when the stored value is unreadable.
+      }
+    }
+    return {
+      email: user.email,
+      emailVerified: Boolean(user.emailVerified),
+      notifications,
+    };
+  }
+
+  async saveNotificationPreferences(
+    userId: string,
+    preferences: {
+      rsvpUpdates: boolean;
+      guestReminders: boolean;
+      eventUpdates: boolean;
+      billingNotifications: boolean;
+    },
+  ) {
+    const notifications = {
+      rsvpUpdates: preferences.rsvpUpdates,
+      guestReminders: preferences.guestReminders,
+      eventUpdates: preferences.eventUpdates,
+      billingNotifications: preferences.billingNotifications,
+    };
+    await this.prisma.platformSetting.upsert({
+      where: { key: this.notificationKey(userId) },
+      update: { value: JSON.stringify(notifications) },
+      create: {
+        key: this.notificationKey(userId),
+        value: JSON.stringify(notifications),
+        description: 'Organizer notification preferences',
+      },
+    });
+    return { notifications };
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('User not found');
+    const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!matches) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+    if (newPassword.length < 8) {
+      throw new BadRequestException('New password must be at least 8 characters');
+    }
+    if (await bcrypt.compare(newPassword, user.passwordHash)) {
+      throw new BadRequestException('Choose a password that is different from the current one');
+    }
+    const passwordHash = await bcrypt.hash(newPassword, await bcrypt.genSalt(10));
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+    await this.bumpSessionVersion(user.id);
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    return { changed: true, ...tokens };
+  }
+
+  async logoutOtherDevices(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true },
+    });
+    if (!user) throw new UnauthorizedException('User not found');
+    await this.bumpSessionVersion(user.id);
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    return { loggedOutOthers: true, ...tokens };
+  }
+
+  async deleteAccount(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('Account was not found');
+    await this.prisma.platformSetting.deleteMany({
+      where: {
+        key: { in: [this.sessionKey(userId), this.notificationKey(userId), `PLAN_USER_${userId}`, `BILLING_HISTORY_${userId}`] },
+      },
+    });
+    await this.prisma.user.delete({ where: { id: userId } });
+    return { deleted: true };
   }
 
   /** Looks up an active plan by cuid or slug. Returns null when no such plan exists. */
@@ -440,7 +628,7 @@ export class AuthService {
     });
 
     const used = new Set<number>();
-    let latest: { planId: string; amount: number } | null = null;
+    let latest: { planId: string; amount: number; cycle?: string } | null = null;
     for (const tx of matches) {
       const meta = this.readChargeMeta(tx.meta);
       const txRef = typeof tx.tx_ref === 'string' ? tx.tx_ref : '';
@@ -471,7 +659,13 @@ export class AuthService {
           : typeof savedPlanId === 'string'
             ? savedPlanId
             : '';
-      if (planId) latest = { planId, amount: Number.isFinite(amount) ? amount : Number(history[index].amount) };
+      if (planId) {
+        latest = {
+          planId,
+          amount: Number.isFinite(amount) ? amount : Number(history[index].amount),
+          cycle: meta.billingCycle,
+        };
+      }
     }
 
     if (used.size === 0) return;
@@ -482,11 +676,11 @@ export class AuthService {
     });
 
     if (latest?.planId) {
-      await this.activatePaidPlan(userId, latest.planId, latest.amount);
+      await this.activatePaidPlan(userId, latest.planId, latest.amount, latest.cycle);
     }
   }
 
-  private readChargeMeta(meta: unknown): { userId?: string; planId?: string; type?: string } {
+  private readChargeMeta(meta: unknown): { userId?: string; planId?: string; type?: string; billingCycle?: string } {
     if (!meta) return {};
     if (typeof meta === 'string') {
       try {
@@ -496,17 +690,17 @@ export class AuthService {
       }
     }
     if (typeof meta !== 'object') return {};
-    const row = meta as { userId?: string; planId?: string; type?: string };
-    return { userId: row.userId, planId: row.planId, type: row.type };
+    const row = meta as { userId?: string; planId?: string; type?: string; billingCycle?: string };
+    return { userId: row.userId, planId: row.planId, type: row.type, billingCycle: row.billingCycle };
   }
 
-  private async activatePaidPlan(userId: string, planId: string, amount: number) {
+  private async activatePaidPlan(userId: string, planId: string, amount: number, cycle?: string) {
     const plan = await this.resolvePlan(planId);
     const value = JSON.stringify({
       planId: plan?.id ?? planId,
       planName: plan?.name ?? null,
       price: amount,
-      cycle: plan?.cycle ?? null,
+      cycle: cycle || plan?.cycle || null,
       isPaid: true,
       status: 'ACTIVE',
       paymentMethod: 'CARD',
@@ -588,7 +782,7 @@ export class AuthService {
 
   async generatePlanCheckoutUrl(
     user: { id: string; email: string; fullName: string; phone?: string | null },
-    plan: { id: string; name: string; price: number },
+    plan: { id: string; name: string; price: number; cycle?: string | null },
     redirectUrl?: string,
   ) {
     const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
@@ -623,6 +817,7 @@ export class AuthService {
             userId: user.id,
             planId: plan.id,
             type: 'ORGANIZER_PLAN_SUBSCRIPTION',
+            billingCycle: plan.cycle,
           },
         }),
       });
@@ -1158,10 +1353,15 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    const plan = await this.resolvePlan(dto.planId);
-    if (!plan) {
+    const catalogPlan = await this.resolvePlan(dto.planId);
+    if (!catalogPlan) {
       throw new NotFoundException(`Plan "${dto.planId}" was not found`);
     }
+    const wantsAnnual = dto.billingCycle?.toLowerCase() === 'annual';
+    const plan =
+      wantsAnnual && catalogPlan.cycle?.toLowerCase() !== 'annual'
+        ? this.applyBillingCycle(catalogPlan, 'annual')!
+        : catalogPlan;
 
     if (plan.price === 0) {
       await this.prisma.platformSetting.upsert({

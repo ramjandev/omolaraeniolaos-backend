@@ -14,7 +14,11 @@ import {
   RsvpStatus,
   CommunicationChannel,
   CheckInFlagStatus,
+  UserRole,
 } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
+import { IndividualGateService } from './individual-gate.service';
 import {
   FilterIndividualEventsDto,
   CreateIndividualEventDto,
@@ -29,6 +33,7 @@ import {
   InviteGuestDto,
 } from './dto/individual-events.dto';
 import { CommunicationsService } from '../communications/communications.service';
+import { readOrganizerAdmins, saveOrganizerAdmin } from '../agency/organizer-admins';
 
 @Injectable()
 export class IndividualEventsService {
@@ -44,6 +49,7 @@ export class IndividualEventsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommunicationsService)
     private readonly communicationsService: CommunicationsService,
+    @Inject(IndividualGateService) private readonly gate: IndividualGateService,
   ) {}
 
   /**
@@ -395,9 +401,22 @@ export class IndividualEventsService {
       ? new Date(dto.endDate)
       : new Date(startDate.getTime() + 1000 * 60 * 60 * 5); // default 5 hours duration
 
+    const agencyClientId = await this.resolveAgencyClient(user.id, dto);
+    const venueSpace = dto.venueSpaceId
+      ? await this.prisma.venueSpace.findFirst({
+          where: { id: dto.venueSpaceId, venue: { userId: user.id } },
+          select: { id: true, name: true, venueId: true },
+        })
+      : null;
+    if (dto.venueSpaceId && !venueSpace) {
+      throw new BadRequestException('That venue does not belong to your account');
+    }
+
     const event = await this.prisma.event.create({
       data: {
         organizerId: user.id,
+        agencyClientId,
+        venueSpaceId: venueSpace?.id,
         title: dto.title,
         slug,
         category: dto.category || 'General',
@@ -407,7 +426,7 @@ export class IndividualEventsService {
         startDate,
         endDate,
         capacity: dto.capacity || 100,
-        venueName: dto.venueName,
+        venueName: dto.venueName || venueSpace?.name,
         address: dto.address,
         city: dto.city,
         country: dto.country,
@@ -420,8 +439,174 @@ export class IndividualEventsService {
 
     // Initialize 6 checklist steps
     this.setupStepsState.set(event.id, [true, false, false, false, false, false]);
+    if (venueSpace && dto.clientName?.trim()) {
+      await this.prisma.venueBooking.create({
+        data: {
+          bookingCode: `VB-${Date.now().toString(36)}`,
+          venueId: venueSpace.venueId,
+          spaceId: venueSpace.id,
+          eventId: event.id,
+          clientName: dto.clientName.trim(),
+          contactEmail: user.email,
+          startDate,
+          endDate,
+          totalGuests: dto.capacity || 0,
+          totalAmount: 0,
+          currency: 'NGN',
+        },
+      });
+    }
+    try {
+      await this.attachEventTeam(user.id, event.id, dto);
+    } catch (error) {
+      const teamWarning = error instanceof Error ? error.message : 'The team could not be assigned';
+      this.logger.warn(`Event ${event.id} was created, but the team was not assigned: ${teamWarning}`);
+      return { ...event, teamWarning };
+    }
 
     return event;
+  }
+
+  private async resolveAgencyClient(userId: string, dto: CreateIndividualEventDto) {
+    if (!dto.agencyClientId && !dto.newClient) return undefined;
+    const agency = await this.prisma.agencyProfile.findFirst({ where: { userId } });
+    if (!agency) throw new BadRequestException('Create your agency profile before adding a client');
+
+    if (dto.agencyClientId) {
+      const client = await this.prisma.agencyClient.findFirst({
+        where: { id: dto.agencyClientId, agencyId: agency.id },
+      });
+      if (!client) throw new BadRequestException('That client does not belong to your agency');
+      return client.id;
+    }
+
+    const created = dto.newClient;
+    if (!created) return undefined;
+    const name = created.name.trim();
+    const client = await this.prisma.agencyClient.create({
+      data: {
+        agencyId: agency.id,
+        name,
+        industry: created.industry?.trim() || '',
+        contactPerson: name,
+        contactEmail: created.contactEmail.trim(),
+        contactPhone: created.contactPhone?.trim() || null,
+        contractTotal: 0,
+        currency: 'NGN',
+      },
+    });
+    return client.id;
+  }
+
+  private async attachEventTeam(userId: string, eventId: string, dto: CreateIndividualEventDto) {
+    for (const member of dto.team || []) {
+      if (member.kind === 'gate') {
+        await this.gate.assignStaff({ staffId: member.memberId, eventId, gateNumber: 'Gate 1' }, userId);
+        continue;
+      }
+      await this.assignAdminToEvent(userId, member.memberId, eventId);
+    }
+
+    if (!dto.newTeamMember) return;
+    const invite = dto.newTeamMember;
+    if (invite.role === 'Gate Staff') {
+      await this.gate.inviteStaff(
+        {
+          fullName: invite.fullName.trim(),
+          email: invite.email.trim(),
+          phone: invite.phone?.trim(),
+          role: 'Gate Staff',
+          eventId,
+          gateNumber: 'Gate 1',
+        },
+        userId,
+      );
+      return;
+    }
+
+    const organizer = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    if (organizer?.role === UserRole.VENUE) {
+      const email = invite.email.toLowerCase().trim();
+      let member = await this.prisma.user.findUnique({ where: { email } });
+      if (member?.role === UserRole.GATE) {
+        throw new BadRequestException('This email belongs to a gate staff account. Add them as Gate Staff.');
+      }
+      if (!member) {
+        member = await this.prisma.user.create({
+          data: {
+            email,
+            fullName: invite.fullName.trim(),
+            phone: invite.phone?.trim() || null,
+            passwordHash: await bcrypt.hash(randomBytes(6).toString('base64url'), 10),
+            role: UserRole.GUEST,
+          },
+        });
+      }
+      await saveOrganizerAdmin(this.prisma, userId, member.id, eventId);
+      return;
+    }
+
+    const agency = await this.prisma.agencyProfile.findFirst({ where: { userId } });
+    if (!agency) throw new BadRequestException('Create your agency profile before adding a team member');
+    const email = invite.email.toLowerCase().trim();
+    let member = await this.prisma.user.findUnique({ where: { email } });
+    if (member?.role === UserRole.GATE) {
+      throw new BadRequestException('This email belongs to a gate staff account. Add them as Gate Staff.');
+    }
+    if (!member) {
+      member = await this.prisma.user.create({
+        data: {
+          email,
+          fullName: invite.fullName.trim(),
+          phone: invite.phone?.trim() || null,
+          passwordHash: await bcrypt.hash(randomBytes(6).toString('base64url'), 10),
+          role: UserRole.GUEST,
+        },
+      });
+    }
+    await this.prisma.agencyTeamMember.upsert({
+      where: { agencyId_userId: { agencyId: agency.id, userId: member.id } },
+      update: { roleTitle: 'Admin', permissions: { eventId } },
+      create: {
+        agencyId: agency.id,
+        userId: member.id,
+        roleTitle: 'Admin',
+        permissions: { eventId },
+      },
+    });
+  }
+
+  private async assignAdminToEvent(userId: string, memberId: string, eventId: string) {
+    const organizer = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    if (organizer?.role === UserRole.VENUE) {
+      const admins = await readOrganizerAdmins(this.prisma, userId);
+      if (!admins.some((record) => record.userId === memberId)) {
+        throw new BadRequestException('That team member is not on your venue team');
+      }
+      await saveOrganizerAdmin(this.prisma, userId, memberId, eventId);
+      return;
+    }
+
+    const agency = await this.prisma.agencyProfile.findFirst({ where: { userId } });
+    if (!agency) throw new BadRequestException('Agency profile was not found');
+    const member = await this.prisma.agencyTeamMember.findFirst({
+      where: { agencyId: agency.id, userId: memberId },
+    });
+    if (!member) throw new BadRequestException('That team member is not on your agency team');
+    const current =
+      member.permissions && typeof member.permissions === 'object' && !Array.isArray(member.permissions)
+        ? member.permissions
+        : {};
+    await this.prisma.agencyTeamMember.update({
+      where: { id: member.id },
+      data: { permissions: { ...current, eventId } },
+    });
   }
 
   /**
@@ -648,6 +833,26 @@ export class IndividualEventsService {
       include: { ticketTier: true },
     });
 
+    let invitation: { sent: boolean; channel: string; error?: string } | null = null;
+    if (dto.sendInvite) {
+      const channel = dto.inviteThrough || 'WhatsApp';
+      try {
+        const result = await this.communicationsService.dispatchInvite(ev.id, attendee.id, channel);
+        const emailDelivery = result.deliveries?.find((delivery) => String(delivery.channel) === 'EMAIL');
+        invitation = {
+          sent: true,
+          channel,
+          error:
+            emailDelivery?.status === 'failed'
+              ? emailDelivery.error || 'Email was not delivered to the guest'
+              : undefined,
+        };
+      } catch (err: any) {
+        this.logger.error(`Invite failed for guest ${attendee.id}: ${err.message}`);
+        invitation = { sent: false, channel, error: err.message };
+      }
+    }
+
     return {
       id: attendee.id,
       name: attendee.fullName,
@@ -655,11 +860,12 @@ export class IndividualEventsService {
       phone: attendee.phone,
       type: dto.type || 'General',
       checkInStatus: dto.checkInStatus || 'Not Arrived',
-      rsvpStatus: dto.rsvpStatus || 'Confirmed',
+      rsvpStatus: invitation?.sent ? 'Awaiting Response' : dto.rsvpStatus || 'Confirmed',
       inviteThrough: dto.inviteThrough || 'WhatsApp',
       partySize: dto.partySize || 1,
       preference: dto.preference || '--',
       qrCode: attendee.qrCode,
+      invitation,
     };
   }
 
@@ -668,10 +874,21 @@ export class IndividualEventsService {
    */
   async bulkAddGuests(eventId: string, dto: BulkAddIndividualGuestsDto) {
     const results = [];
+    let sent = 0;
+    let failed = 0;
+    let emailError = '';
     for (const g of dto.guests) {
       try {
-        const added = await this.addGuest(eventId, g);
+        const added = await this.addGuest(eventId, {
+          ...g,
+          sendInvite: dto.sendInvites === true,
+        });
         results.push(added);
+        if (dto.sendInvites) {
+          if (added.invitation?.sent) sent += 1;
+          else failed += 1;
+          if (added.invitation?.error) emailError = emailError || added.invitation.error;
+        }
       } catch (err: any) {
         this.logger.warn(`Failed to add guest ${g.name}: ${err.message}`);
       }
@@ -680,6 +897,7 @@ export class IndividualEventsService {
       success: true,
       importedCount: results.length,
       guests: results,
+      invitations: dto.sendInvites ? { sent, failed, emailError: emailError || null } : null,
     };
   }
 
@@ -733,31 +951,67 @@ export class IndividualEventsService {
   /**
    * 13. SEND GUEST INVITATION
    */
-  async sendAllInvites(eventId: string) {
+  async sendAllInvites(eventId: string, guestIds?: string[]) {
     const ev = await this.resolveEvent(eventId);
+    const chosen = (guestIds || []).map((id) => id.trim()).filter(Boolean);
     const pending = await this.prisma.attendee.findMany({
-      where: { eventId: ev.id, rsvpStatus: RsvpStatus.NOT_SENT },
-      select: { id: true },
+      where: chosen.length
+        ? { eventId: ev.id, id: { in: chosen } }
+        : { eventId: ev.id, rsvpStatus: RsvpStatus.NOT_SENT },
+      select: { id: true, inviteChannel: true },
     });
 
     let sent = 0;
     let failed = 0;
+    let emailSent = 0;
+    let emailMissing = 0;
+    let emailError = '';
+    let testInbox = '';
     for (const guest of pending) {
       try {
-        await this.communicationsService.dispatchInvite(ev.id, guest.id);
+        const result = await this.communicationsService.dispatchInvite(
+          ev.id,
+          guest.id,
+          this.channelLabel(guest.inviteChannel),
+        );
         sent += 1;
+        const emailDelivery = result.deliveries?.find((delivery) => String(delivery.channel) === 'EMAIL');
+        if (!emailDelivery) emailMissing += 1;
+        else if (emailDelivery.status === 'failed') emailError = emailError || emailDelivery.error || 'Email was not delivered';
+        else {
+          emailSent += 1;
+          const deliveredTo = String(emailDelivery.deliveredTo || '');
+          if (deliveredTo && deliveredTo.toLowerCase() !== String(emailDelivery.to || '').toLowerCase()) {
+            testInbox = deliveredTo;
+          }
+        }
       } catch (err: any) {
         failed += 1;
         this.logger.error(`Invite failed for guest ${guest.id}: ${err.message}`);
       }
     }
 
+    const emailNote =
+      pending.length === 0
+        ? ''
+        : testInbox
+          ? ` Testing copy sent to ${testInbox}. The Resend onboarding sender can only deliver to that inbox until a domain is verified.`
+          : emailSent > 0 && !emailError
+            ? ` Email sent to ${emailSent} guest${emailSent === 1 ? '' : 's'}.`
+            : emailMissing === pending.length
+              ? ' No email address is saved on these guests, so nothing was emailed.'
+              : emailError
+                ? ` Email was not delivered to the guest address: ${emailError}`
+                : '';
+
     const message =
       pending.length === 0
-        ? 'Every guest already has an invitation.'
+        ? chosen.length
+          ? 'None of the selected guests were found on this event.'
+          : 'Every guest already has an invitation.'
         : failed > 0
-          ? `Sent ${sent} invitation${sent === 1 ? '' : 's'}. ${failed} could not be sent.`
-          : `Sent ${sent} invitation${sent === 1 ? '' : 's'}.`;
+          ? `Sent ${sent} invitation${sent === 1 ? '' : 's'}. ${failed} could not be sent.${emailNote}`
+          : `Sent ${sent} invitation${sent === 1 ? '' : 's'}.${emailNote}`;
 
     return { message, data: { sent, failed, total: pending.length } };
   }

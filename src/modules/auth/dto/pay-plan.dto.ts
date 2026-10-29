@@ -17,4 +17,12 @@ export class PayPlanDto {
   @IsOptional()
   @IsString()
   redirectUrl?: string;
+
+  @ApiPropertyOptional({
+    example: 'annual',
+    description: 'Use annual to charge a monthly plan as 12 months at the standard 20% discount',
+  })
+  @IsOptional()
+  @IsString()
+  billingCycle?: string;
 }

@@ -2,6 +2,8 @@ import {
   Controller,
   Post,
   Get,
+  Put,
+  Delete,
   Body,
   UseGuards,
   HttpCode,
@@ -20,6 +22,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto, NotificationPreferencesDto, UpdateProfileDto } from './dto/account-settings.dto';
 import { AuthResponseDto, TokenResponseDto } from './dto/auth-response.dto';
 import { RegisterOrganizerIndividualDto } from './dto/register-organizer-individual.dto';
 import { RegisterOrganizerAgencyDto } from './dto/register-organizer-agency.dto';
@@ -176,5 +179,67 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getProfile(@CurrentUser() user: CurrentUserDto) {
     return this.authService.getProfile(user.id);
+  }
+
+  @Put('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ResponseMessage('Profile updated successfully')
+  @ApiOperation({ summary: 'Update the signed-in account name, email, phone, and photo' })
+  @ApiBody({ type: UpdateProfileDto })
+  async updateProfile(@CurrentUser() user: CurrentUserDto, @Body() dto: UpdateProfileDto) {
+    return this.authService.updateProfile(user.id, dto);
+  }
+
+  @Get('settings')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ResponseMessage('Account settings retrieved')
+  @ApiOperation({ summary: 'Notification preferences and email verification for the signed-in account' })
+  async accountSettings(@CurrentUser() user: CurrentUserDto) {
+    return this.authService.getAccountSettings(user.id);
+  }
+
+  @Put('notification-preferences')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ResponseMessage('Notification preferences saved')
+  @ApiOperation({ summary: 'Save RSVP, reminder, event, and billing notification choices' })
+  @ApiBody({ type: NotificationPreferencesDto })
+  async saveNotifications(
+    @CurrentUser() user: CurrentUserDto,
+    @Body() dto: NotificationPreferencesDto,
+  ) {
+    return this.authService.saveNotificationPreferences(user.id, dto);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ResponseMessage('Password changed successfully')
+  @ApiOperation({ summary: 'Change the signed-in account password and keep this browser signed in' })
+  @ApiBody({ type: ChangePasswordDto })
+  async changePassword(@CurrentUser() user: CurrentUserDto, @Body() dto: ChangePasswordDto) {
+    return this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword);
+  }
+
+  @Post('logout-other-devices')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ResponseMessage('Other devices have been logged out')
+  @ApiOperation({ summary: 'End every other signed-in session for this account' })
+  async logoutOtherDevices(@CurrentUser() user: CurrentUserDto) {
+    return this.authService.logoutOtherDevices(user.id);
+  }
+
+  @Delete('account')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ResponseMessage('Account deleted')
+  @ApiOperation({ summary: 'Permanently delete the signed-in account and its events' })
+  async deleteAccount(@CurrentUser() user: CurrentUserDto) {
+    return this.authService.deleteAccount(user.id);
   }
 }

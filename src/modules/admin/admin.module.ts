@@ -6,6 +6,7 @@ import { AdminRevenuePlansController } from './admin-revenue.controller';
 import { AdminSettingsController } from './admin-settings.controller';
 import { AdminAnalyticsController } from './admin-analytics.controller';
 import { AdminPlansController } from './admin-plans.controller';
+import { AdminUsersController } from './admin-users.controller';
 
 @Module({
   controllers: [
@@ -15,6 +16,7 @@ import { AdminPlansController } from './admin-plans.controller';
     AdminAnalyticsController,
     AdminSettingsController,
     AdminPlansController,
+    AdminUsersController,
     AdminController,
   ],
   providers: [AdminService],

@@ -1,9 +1,9 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsEnum, IsInt, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString } from 'class-validator';
-import { SpaceType } from '@prisma/client';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SpaceStatus, SpaceType } from '@prisma/client';
+import { IsArray, IsEnum, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString } from 'class-validator';
 
 export class CreateSpaceDto {
-  @ApiProperty({ example: 'Grand Imperial Ballroom' })
+  @ApiProperty({ example: 'Grand Ballroom A' })
   @IsString()
   @IsNotEmpty()
   name: string;
@@ -12,29 +12,79 @@ export class CreateSpaceDto {
   @IsEnum(SpaceType)
   type: SpaceType;
 
-  @ApiProperty({ example: 1500, type: Number })
+  @ApiPropertyOptional({ example: 500 })
+  @IsOptional()
   @IsInt()
   @IsPositive()
-  capacity: number;
+  capacity?: number;
 
-  @ApiProperty({ example: 1200, type: Number })
-  @IsNumber()
-  @IsPositive()
-  squareMeters: number;
-
-  @ApiProperty({ example: 2500000, type: Number })
-  @IsNumber()
-  @IsPositive()
-  dailyRate: number;
-
-  @ApiProperty({ example: 'NGN', default: 'NGN' })
-  @IsString()
+  @ApiPropertyOptional({ example: '1 Eko Hotel Drive, Victoria Island, Lagos' })
   @IsOptional()
-  currency?: string;
+  @IsString()
+  address?: string;
 
-  @ApiProperty({ example: ['State-of-art PA System', 'Climate Controlled', 'VIP Green Room', 'Valet Parking'], type: [String] })
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
+  @ApiPropertyOptional({ enum: SpaceStatus })
+  @IsOptional()
+  @IsEnum(SpaceStatus)
+  status?: SpaceStatus;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
+  amenities?: string[];
+}
+
+export class UpdateSpaceDto {
+  @ApiPropertyOptional()
   @IsOptional()
+  @IsString()
+  name?: string;
+
+  @ApiPropertyOptional({ enum: SpaceType })
+  @IsOptional()
+  @IsEnum(SpaceType)
+  type?: SpaceType;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  capacity?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
+  @ApiPropertyOptional({ enum: SpaceStatus })
+  @IsOptional()
+  @IsEnum(SpaceStatus)
+  status?: SpaceStatus;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   amenities?: string[];
 }

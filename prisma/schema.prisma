@@ -267,6 +267,7 @@ model AgencyClient {
   contactEmail  String
   contactPhone  String?
   logoUrl       String?
+  notes         String?       @db.Text
   status        String        @default("active") // active, on_hold, pending
   contractTotal Float         @default(0.0)
   currency      String        @default("USD")
@@ -356,6 +357,8 @@ model VenueSpace {
   currency     String       @default("USD")
   status       SpaceStatus  @default(AVAILABLE)
   imageUrl     String?
+  address      String?
+  description  String?      @db.Text
   amenities    String[] // Array of feature tags
 
   bookings     VenueBooking[]
@@ -405,6 +408,7 @@ model TableZone {
   seatPerTable  Int
   totalCapacity Int
   shape         TableShape  @default(ROUND)
+  layout        String?     @db.Text
 
   assignments TableAssignment[]
 

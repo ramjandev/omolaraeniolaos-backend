@@ -6,6 +6,9 @@ import {
   IsNumber,
   IsEnum,
   IsArray,
+  IsBoolean,
+  IsEmail,
+  IsIn,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -146,6 +149,43 @@ export class CreateIndividualEventDto {
   country?: string;
 
   @ApiPropertyOptional({
+    description: 'Agency client this event is produced for. Omit for an agency-owned event.',
+    example: 'clxclient123',
+  })
+  @IsString()
+  @IsOptional()
+  agencyClientId?: string;
+
+  @ApiPropertyOptional({ description: 'Create a client during event setup when they are not already on the agency list' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NewAgencyClientDto)
+  newClient?: NewAgencyClientDto;
+
+  @ApiPropertyOptional({ description: 'Existing agency admins or gate staff to assign to this event' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EventTeamPickDto)
+  team?: EventTeamPickDto[];
+
+  @ApiPropertyOptional({ description: 'Venue space this event is booked into' })
+  @IsString()
+  @IsOptional()
+  venueSpaceId?: string;
+
+  @ApiPropertyOptional({ description: 'Client the venue is hosting this event for' })
+  @IsString()
+  @IsOptional()
+  clientName?: string;
+
+  @ApiPropertyOptional({ description: 'Invite a team member during event setup when they are not already on the team' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NewEventTeamMemberDto)
+  newTeamMember?: NewEventTeamMemberDto;
+
+  @ApiPropertyOptional({
     description: 'Parking Information for guests',
     example: 'Complimentary valet parking is available at the main drop-off entrance.',
   })
@@ -266,6 +306,14 @@ export class AddIndividualGuestDto {
   @IsString()
   @IsOptional()
   preference?: string;
+
+  @ApiPropertyOptional({
+    description: 'Send the event invitation immediately after the guest is saved',
+    example: true,
+  })
+  @IsBoolean()
+  @IsOptional()
+  sendInvite?: boolean;
 }
 
 export class BulkAddIndividualGuestsDto {
@@ -277,6 +325,14 @@ export class BulkAddIndividualGuestsDto {
   @ValidateNested({ each: true })
   @Type(() => AddIndividualGuestDto)
   guests: AddIndividualGuestDto[];
+
+  @ApiPropertyOptional({
+    description: 'Send an invitation to every imported guest',
+    example: true,
+  })
+  @IsBoolean()
+  @IsOptional()
+  sendInvites?: boolean;
 }
 
 export class UpdateIndividualGuestDto {
@@ -430,5 +486,70 @@ export class InviteGuestDto {
   @IsString()
   @IsOptional()
   channel?: string;
+}
+
+export class SendInvitationsDto {
+  @ApiPropertyOptional({
+    description: 'Send only to these guest ids. Omit to invite every guest who has not been invited.',
+    type: [String],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  guestIds?: string[];
+}
+
+export class NewAgencyClientDto {
+  @ApiProperty({ example: 'Amara Okafor' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({ example: 'amara@oakandivory.com' })
+  @IsEmail()
+  contactEmail: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  industry?: string;
+}
+
+export class EventTeamPickDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  memberId: string;
+
+  @ApiProperty({ enum: ['admin', 'gate'] })
+  @IsString()
+  @IsIn(['admin', 'gate'])
+  kind: 'admin' | 'gate';
+}
+
+export class NewEventTeamMemberDto {
+  @ApiProperty({ example: 'Amina Diallo' })
+  @IsString()
+  @IsNotEmpty()
+  fullName: string;
+
+  @ApiProperty({ example: 'amina@email.com' })
+  @IsEmail()
+  email: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiProperty({ enum: ['Admin', 'Gate Staff'] })
+  @IsString()
+  @IsIn(['Admin', 'Gate Staff'])
+  role: 'Admin' | 'Gate Staff';
 }
 

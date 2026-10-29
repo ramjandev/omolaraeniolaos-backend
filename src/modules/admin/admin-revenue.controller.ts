@@ -59,14 +59,16 @@ export class AdminRevenuePlansController {
   @ApiQuery({ name: 'search', required: false, type: String, example: 'TXN-8392A7B1' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+  @ApiQuery({ name: 'sort', required: false, type: String, example: 'date' })
   @ApiResponse({ status: 200, description: 'Filtered transactions table returned' })
   async getTransactions(
     @Query('status') status?: string,
     @Query('search') search?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('sort') sort?: string,
   ) {
-    return this.adminService.getRevenueTransactions(status, search, page, limit);
+    return this.adminService.getRevenueTransactions(status, search, page, limit, sort);
   }
 
   /**

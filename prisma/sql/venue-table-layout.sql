@@ -1,0 +1,1 @@
+ALTER TABLE "TableZone" ADD COLUMN IF NOT EXISTS "layout" TEXT;

@@ -21,6 +21,7 @@ export interface ChannelDelivery {
   channel: DispatchChannel;
   status: DeliveryStatus;
   to: string;
+  deliveredTo?: string;
   error?: string;
 }
 
@@ -611,6 +612,7 @@ export class CommunicationsService {
       channel: DispatchChannel.EMAIL,
       status: result.ok ? 'sent' : 'failed',
       to,
+      deliveredTo: result.deliveredTo,
       error: result.ok ? undefined : result.error,
     };
   }
@@ -710,13 +712,18 @@ export class CommunicationsService {
 
   private inviteChannels(attendee: Attendee, preferred?: string): DispatchChannel[] {
     const channels: DispatchChannel[] = [];
-    if (attendee.phone) channels.push(DispatchChannel.WHATSAPP);
-    if (attendee.email) channels.push(DispatchChannel.EMAIL);
     const mapped = preferred ? this.mapChannel(preferred) : null;
-    if (mapped === DispatchChannel.SMS && attendee.phone && !channels.includes(DispatchChannel.SMS)) {
-      channels.push(DispatchChannel.SMS);
-    }
-    return channels.length ? channels : [DispatchChannel.WHATSAPP];
+    if (mapped === DispatchChannel.SMS && attendee.phone) channels.push(DispatchChannel.SMS);
+    else if (mapped === DispatchChannel.WHATSAPP && attendee.phone) channels.push(DispatchChannel.WHATSAPP);
+    else if (mapped !== DispatchChannel.EMAIL && attendee.phone) channels.push(DispatchChannel.WHATSAPP);
+
+    if (this.hasEmail(attendee.email)) channels.push(DispatchChannel.EMAIL);
+    if (!channels.length) channels.push(attendee.phone ? DispatchChannel.WHATSAPP : DispatchChannel.EMAIL);
+    return channels;
+  }
+
+  private hasEmail(value?: string | null) {
+    return Boolean(value && value.includes('@'));
   }
 
   private availableChannels(attendee: Attendee): DispatchChannel[] {

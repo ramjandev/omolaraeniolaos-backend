@@ -1,0 +1,2 @@
+ALTER TABLE "VenueSpace" ADD COLUMN IF NOT EXISTS "address" TEXT;
+ALTER TABLE "VenueSpace" ADD COLUMN IF NOT EXISTS "description" TEXT;

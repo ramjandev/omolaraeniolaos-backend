@@ -40,6 +40,60 @@ export class FilterIndividualEventsDto {
   category?: string;
 }
 
+export class NewAgencyClientDto {
+  @ApiProperty({ example: 'Amara Okafor' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({ example: 'amara@oakandivory.com' })
+  @IsEmail()
+  contactEmail: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  industry?: string;
+}
+
+export class EventTeamPickDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  memberId: string;
+
+  @ApiProperty({ enum: ['admin', 'gate'] })
+  @IsString()
+  @IsIn(['admin', 'gate'])
+  kind: 'admin' | 'gate';
+}
+
+export class NewEventTeamMemberDto {
+  @ApiProperty({ example: 'Amina Diallo' })
+  @IsString()
+  @IsNotEmpty()
+  fullName: string;
+
+  @ApiProperty({ example: 'amina@email.com' })
+  @IsEmail()
+  email: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiProperty({ enum: ['Admin', 'Gate Staff'] })
+  @IsString()
+  @IsIn(['Admin', 'Gate Staff'])
+  role: 'Admin' | 'Gate Staff';
+}
+
 export class CreateIndividualEventDto {
   @ApiProperty({
     description: 'Event Title',
@@ -497,59 +551,5 @@ export class SendInvitationsDto {
   @IsString({ each: true })
   @IsOptional()
   guestIds?: string[];
-}
-
-export class NewAgencyClientDto {
-  @ApiProperty({ example: 'Amara Okafor' })
-  @IsString()
-  @IsNotEmpty()
-  name: string;
-
-  @ApiProperty({ example: 'amara@oakandivory.com' })
-  @IsEmail()
-  contactEmail: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  contactPhone?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  industry?: string;
-}
-
-export class EventTeamPickDto {
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  memberId: string;
-
-  @ApiProperty({ enum: ['admin', 'gate'] })
-  @IsString()
-  @IsIn(['admin', 'gate'])
-  kind: 'admin' | 'gate';
-}
-
-export class NewEventTeamMemberDto {
-  @ApiProperty({ example: 'Amina Diallo' })
-  @IsString()
-  @IsNotEmpty()
-  fullName: string;
-
-  @ApiProperty({ example: 'amina@email.com' })
-  @IsEmail()
-  email: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  phone?: string;
-
-  @ApiProperty({ enum: ['Admin', 'Gate Staff'] })
-  @IsString()
-  @IsIn(['Admin', 'Gate Staff'])
-  role: 'Admin' | 'Gate Staff';
 }
 

@@ -26,7 +26,7 @@ import {
 import { UserRole } from '@prisma/client';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Public, Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUserDto } from '../../common/dto/current-user.dto';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
@@ -43,6 +43,7 @@ export class IndividualGateController {
   ) {}
 
   @Get('invitation')
+  @Public()
   @ResponseMessage('Gate staff invitation retrieved')
   @ApiOperation({
     summary: '[Public] Preview a gate staff invitation',

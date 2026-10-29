@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ConflictException, Inject, HttpException, BadRequestException } from '@nestjs/common';
-import { AttendeeStatus } from '@prisma/client';
+import { AttendeeStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ScanDto } from './dto/scan.dto';
 
@@ -170,10 +170,21 @@ export class GateService {
       });
     }
 
-    const profileId = user.staffProfile?.id;
-    const shifts = profileId
-      ? await this.prisma.gateStaffShift.findMany({
-          where: { staffId: profileId, isActive: true },
+    let profile = user.staffProfile;
+    if (!profile && user.role === UserRole.GATE) {
+      profile = await this.prisma.gateStaffProfile.create({
+        data: { userId: user.id },
+      });
+    }
+    const profileId = profile?.id;
+    const shifts = await this.prisma.gateStaffShift.findMany({
+          where: {
+            isActive: true,
+            OR: [
+              ...(profileId ? [{ staffId: profileId }] : []),
+              { staff: { userId: user.id } },
+            ],
+          },
           include: {
             event: {
               include: {
@@ -183,8 +194,7 @@ export class GateService {
             },
           },
           orderBy: { shiftStart: 'desc' },
-        })
-      : [];
+        });
 
     const scans = profileId
       ? await this.prisma.gateScanLog.findMany({
@@ -208,7 +218,7 @@ export class GateService {
       events: shifts.map((shift) => {
         const guests = shift.event.attendees;
         const now = Date.now();
-        const ended = shift.event.endDate.getTime() < now;
+        const ended = Boolean(shift.event.endDate && shift.event.endDate.getTime() < now);
         const live = shift.event.status === 'LIVE';
         return {
           id: shift.event.id,

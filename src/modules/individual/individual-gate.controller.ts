@@ -53,6 +53,16 @@ export class IndividualGateController {
     return this.gateService.getInvitation(token || '');
   }
 
+  @Post('invitation/accept')
+  @Public()
+  @ResponseMessage('Gate staff invitation accepted')
+  @ApiOperation({
+    summary: '[Public] Save the event assignment from a gate staff invitation',
+  })
+  async acceptInvitation(@Body('token') token?: string) {
+    return this.gateService.getInvitation(token || '');
+  }
+
   @Get()
   @ResponseMessage('Gate management roster retrieved successfully')
   @ApiOperation({

@@ -83,15 +83,24 @@ export class IndividualGateService {
     const event = eventId
       ? await this.prisma.event.findUnique({
           where: { id: eventId },
-          select: { title: true, startDate: true },
+          select: { id: true, title: true, startDate: true },
         })
       : null;
+    const gateNumber = typeof payload.gateNumber === 'string' && payload.gateNumber ? payload.gateNumber : '';
+    if (event) {
+      const profile = await this.prisma.gateStaffProfile.upsert({
+        where: { userId: staff.id },
+        update: {},
+        create: { userId: staff.id, gateCode: gateNumber || 'GATE-1' },
+      });
+      await this.saveShift(profile.id, event.id, gateNumber || 'Gate 1');
+    }
 
     return {
       organizerName: organizer?.fullName || 'Your organizer',
       eventTitle: event?.title || 'Event not assigned yet',
       eventDate: event?.startDate ? event.startDate.toISOString() : null,
-      gateNumber: typeof payload.gateNumber === 'string' && payload.gateNumber ? payload.gateNumber : 'Not assigned yet',
+      gateNumber: gateNumber || 'Not assigned yet',
       role: 'Gate Staff',
       email: staff.email,
       staffName: staff.fullName,

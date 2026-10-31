@@ -14,6 +14,8 @@ import { VenueModule } from './modules/venue/venue.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { VoiceRsvpModule } from './modules/voice-rsvp/voice-rsvp.module';
 import { CommunicationsModule } from './modules/communications/communications.module';
+import { ChatModule } from './modules/chat/chat.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { CommunicationsModule } from './modules/communications/communications.mo
     AdminModule,
     VoiceRsvpModule,
     CommunicationsModule,
+    ChatModule,
+    UploadsModule,
   ],
 })
 export class AppModule {}

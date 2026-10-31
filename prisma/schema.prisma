@@ -778,6 +778,9 @@ model ConversationMessage {
   channel    CommunicationChannel
   direction  ConversationDirection
   body       String                @db.Text
+  mediaUrl   String?
+  mediaKind  String?
+  fileName   String?
   createdAt  DateTime              @default(now())
 
   @@index([attendeeId])

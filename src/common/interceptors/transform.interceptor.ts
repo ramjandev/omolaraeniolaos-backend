@@ -16,6 +16,9 @@ export class TransformInterceptor<T> implements NestInterceptor<T, ApiResponse<T
   constructor(@Inject(Reflector) private reflector: Reflector) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<ApiResponse<T>> {
+    if (context.getType() !== 'http') {
+      return next.handle() as Observable<ApiResponse<T>>;
+    }
     const response = context.switchToHttp().getResponse();
     const statusCode = response.statusCode || 200;
 

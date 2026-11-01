@@ -475,6 +475,7 @@ model Event {
   attendees      Attendee[]
   orders         Order[]
   communications GuestCommunication[]
+  messageTemplates MessageTemplate[]
   tableZones     TableZone[]
   venueBookings  VenueBooking[]
   invoices       AgencyInvoice[]
@@ -744,6 +745,19 @@ model GuestCommunication {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([eventId])
+}
+
+model MessageTemplate {
+  id        String               @id @default(cuid())
+  eventId   String
+  event     Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name      String
+  channel   CommunicationChannel @default(WHATSAPP)
+  content   String               @db.Text
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
 
   @@index([eventId])
 }

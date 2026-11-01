@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Put,
+  Patch,
   Delete,
   Body,
   UseGuards,
@@ -22,7 +23,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { ChangePasswordDto, NotificationPreferencesDto, UpdateProfileDto } from './dto/account-settings.dto';
+import { ChangePasswordDto, NotificationPreferencesDto, UpdateAvatarDto, UpdateProfileDto } from './dto/account-settings.dto';
 import { AuthResponseDto, TokenResponseDto } from './dto/auth-response.dto';
 import { RegisterOrganizerIndividualDto } from './dto/register-organizer-individual.dto';
 import { RegisterOrganizerAgencyDto } from './dto/register-organizer-agency.dto';
@@ -189,6 +190,16 @@ export class AuthController {
   @ApiBody({ type: UpdateProfileDto })
   async updateProfile(@CurrentUser() user: CurrentUserDto, @Body() dto: UpdateProfileDto) {
     return this.authService.updateProfile(user.id, dto);
+  }
+
+  @Patch('me/avatar')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ResponseMessage('Profile picture saved')
+  @ApiOperation({ summary: 'Save the signed-in account profile picture' })
+  @ApiBody({ type: UpdateAvatarDto })
+  async updateAvatar(@CurrentUser() user: CurrentUserDto, @Body() dto: UpdateAvatarDto) {
+    return this.authService.updateAvatar(user.id, dto.avatarUrl);
   }
 
   @Get('settings')

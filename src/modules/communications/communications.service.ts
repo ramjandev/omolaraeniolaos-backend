@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Attendee,
@@ -14,6 +14,44 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { DispatchChannel, DispatchMessageDto } from './dto/dispatch.dto';
 import { GuestRsvpDto } from './dto/guest-rsvp.dto';
+import { SaveMessageTemplateDto } from './dto/message-template.dto';
+
+const DEFAULT_MESSAGE_TEMPLATES: Array<{
+  name: string;
+  channel: CommunicationChannel;
+  content: string;
+}> = [
+  {
+    name: 'RSVP Reminder',
+    channel: CommunicationChannel.WHATSAPP,
+    content:
+      'Good day {{guest_name}},\n\nWe look forward to having you join us for {{event_name}} on {{event_date}} at {{venue}}.\n\nKindly confirm your attendance by tapping the RSVP link below:\n{{rsvp_link}}\n\nWarm regards,\n{{event_name}}',
+  },
+  {
+    name: 'Venue & Parking Directions',
+    channel: CommunicationChannel.WHATSAPP,
+    content:
+      'Dear {{guest_name}},\n\nComplimentary valet parking is available at {{venue}}.\n\nPlease show this pass at the gate.\n\nSee you this evening!',
+  },
+  {
+    name: 'Dress Code & Protocol Reminder',
+    channel: CommunicationChannel.WHATSAPP,
+    content:
+      'Dear {{guest_name}},\n\nFriendly reminder regarding {{event_name}}.\nYour allocated seating: {{table_number}}.\n\nWe look forward to seeing you.',
+  },
+  {
+    name: 'Gift Registry & Tribute Book',
+    channel: CommunicationChannel.WHATSAPP,
+    content:
+      'Greetings {{guest_name}},\n\nThank you for being part of {{event_name}} on {{event_date}}.\n\nYour invitation is here:\n{{rsvp_link}}',
+  },
+  {
+    name: 'Security & Access Protocol',
+    channel: CommunicationChannel.SMS,
+    content:
+      'NOTICE: Please present your verified digital pass for {{event_name}} at {{venue}}. {{guest_name}}',
+  },
+];
 
 export type DeliveryStatus = 'sent' | 'failed' | 'sandbox_logged';
 
@@ -354,6 +392,95 @@ export class CommunicationsService {
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
+  }
+
+  async listTemplates(eventId: string, user: { id: string; role: string }) {
+    await this.assertEventOwner(eventId, user);
+    const existing = await this.prisma.messageTemplate.count({ where: { eventId } });
+    if (existing === 0) {
+      await this.prisma.messageTemplate.createMany({
+        data: DEFAULT_MESSAGE_TEMPLATES.map((template) => ({ ...template, eventId })),
+      });
+    }
+    const rows = await this.prisma.messageTemplate.findMany({
+      where: { eventId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((row) => this.presentTemplate(row));
+  }
+
+  async createTemplate(eventId: string, dto: SaveMessageTemplateDto, user: { id: string; role: string }) {
+    await this.assertEventOwner(eventId, user);
+    const row = await this.prisma.messageTemplate.create({
+      data: {
+        eventId,
+        name: dto.name.trim(),
+        channel: dto.channel,
+        content: dto.content.trim(),
+      },
+    });
+    return this.presentTemplate(row);
+  }
+
+  async updateTemplate(
+    eventId: string,
+    templateId: string,
+    dto: SaveMessageTemplateDto,
+    user: { id: string; role: string },
+  ) {
+    await this.assertEventOwner(eventId, user);
+    await this.assertTemplate(eventId, templateId);
+    const row = await this.prisma.messageTemplate.update({
+      where: { id: templateId },
+      data: {
+        name: dto.name.trim(),
+        channel: dto.channel,
+        content: dto.content.trim(),
+      },
+    });
+    return this.presentTemplate(row);
+  }
+
+  async deleteTemplate(eventId: string, templateId: string, user: { id: string; role: string }) {
+    await this.assertEventOwner(eventId, user);
+    await this.assertTemplate(eventId, templateId);
+    await this.prisma.messageTemplate.delete({ where: { id: templateId } });
+    return { id: templateId };
+  }
+
+  private async assertEventOwner(eventId: string, user: { id: string; role: string }) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { organizerId: true },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (user.role !== 'ADMIN' && event.organizerId !== user.id) {
+      throw new ForbiddenException('You cannot change templates for this event');
+    }
+  }
+
+  private async assertTemplate(eventId: string, templateId: string) {
+    const row = await this.prisma.messageTemplate.findFirst({
+      where: { id: templateId, eventId },
+      select: { id: true },
+    });
+    if (!row) throw new NotFoundException('Template not found');
+  }
+
+  private presentTemplate(row: {
+    id: string;
+    name: string;
+    channel: CommunicationChannel;
+    content: string;
+    updatedAt: Date;
+  }) {
+    return {
+      id: row.id,
+      name: row.name,
+      channel: row.channel,
+      content: row.content,
+      updatedAt: row.updatedAt.toISOString(),
+    };
   }
 
   async listThread(eventId: string, attendeeId: string) {

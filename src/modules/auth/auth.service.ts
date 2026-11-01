@@ -331,6 +331,22 @@ export class AuthService {
     return this.getProfile(userId);
   }
 
+  async updateAvatar(userId: string, avatarUrl: string) {
+    const current = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!current) {
+      throw new UnauthorizedException('User not found');
+    }
+    const url = avatarUrl.trim();
+    if (!url.startsWith('https://')) {
+      throw new BadRequestException('Profile picture must be an uploaded image');
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl: url },
+    });
+    return this.getProfile(userId);
+  }
+
   private async generateTokens(
     userId: string,
     email: string,

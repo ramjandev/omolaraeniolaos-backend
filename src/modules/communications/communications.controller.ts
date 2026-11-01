@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -16,9 +18,12 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CurrentUserDto } from '../../common/dto/current-user.dto';
 import { CommunicationsService } from './communications.service';
 import { DispatchMessageDto } from './dto/dispatch.dto';
 import { GuestRsvpDto } from './dto/guest-rsvp.dto';
+import { SaveMessageTemplateDto } from './dto/message-template.dto';
 
 @ApiTags('07 Shared Organizer / Communications')
 @Controller('communications')
@@ -47,6 +52,47 @@ export class CommunicationsController {
   @ResponseMessage('Event communications retrieved')
   list(@Param('eventId') eventId: string) {
     return this.communicationsService.listEventCommunications(eventId);
+  }
+
+  @Get('events/:eventId/templates')
+  @ResponseMessage('Message templates retrieved')
+  @ApiOperation({ summary: 'List saved message templates for an event' })
+  listTemplates(@Param('eventId') eventId: string, @CurrentUser() user: CurrentUserDto) {
+    return this.communicationsService.listTemplates(eventId, user);
+  }
+
+  @Post('events/:eventId/templates')
+  @ResponseMessage('Message template saved')
+  @ApiOperation({ summary: 'Create a message template for an event' })
+  createTemplate(
+    @Param('eventId') eventId: string,
+    @Body() dto: SaveMessageTemplateDto,
+    @CurrentUser() user: CurrentUserDto,
+  ) {
+    return this.communicationsService.createTemplate(eventId, dto, user);
+  }
+
+  @Patch('events/:eventId/templates/:templateId')
+  @ResponseMessage('Message template updated')
+  @ApiOperation({ summary: 'Update a saved message template' })
+  updateTemplate(
+    @Param('eventId') eventId: string,
+    @Param('templateId') templateId: string,
+    @Body() dto: SaveMessageTemplateDto,
+    @CurrentUser() user: CurrentUserDto,
+  ) {
+    return this.communicationsService.updateTemplate(eventId, templateId, dto, user);
+  }
+
+  @Delete('events/:eventId/templates/:templateId')
+  @ResponseMessage('Message template deleted')
+  @ApiOperation({ summary: 'Delete a saved message template' })
+  deleteTemplate(
+    @Param('eventId') eventId: string,
+    @Param('templateId') templateId: string,
+    @CurrentUser() user: CurrentUserDto,
+  ) {
+    return this.communicationsService.deleteTemplate(eventId, templateId, user);
   }
 
   @Get('events/:eventId/threads/:attendeeId')

@@ -62,9 +62,6 @@ export class AdminService {
     @Inject(MailService) private mail: MailService,
   ) {}
 
-  /**
-   * 1. Dashboard Tab: 4 Top KPI Cards (Pure Numerical & Relational Data from DB)
-   */
   async getDashboardSummary() {
     const [
       individualCount,
@@ -106,9 +103,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 2. Dashboard Tab: Organizer Breakdown (Pure Numerical Data for Charts)
-   */
   async getOrganizerBreakdown() {
     const [individualCount, agencyCount, venueCount] = await Promise.all([
       this.prisma.user.count({ where: { role: UserRole.INDIVIDUAL } }),
@@ -140,9 +134,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 3. Dashboard Tab: Revenue by Organizer Type (Pure Aggregated DB Data)
-   */
   async getRevenueByOrganizerType() {
     const [individualUsers, agencyUsers, venueUsers] = await Promise.all([
       this.prisma.user.findMany({
@@ -237,9 +228,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 4. Dashboard Tab: Active Events Table (Query directly from DB Event relation)
-   */
   async getDashboardActiveEvents(page: number = 1, limit: number = 10, search?: string) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.max(1, Number(limit) || 10);
@@ -316,9 +304,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * Admin Events page: every organizer event, with status tabs and filters.
-   */
   async getAdminEventsList(query: {
     page?: number;
     limit?: number;
@@ -458,9 +443,6 @@ export class AdminService {
     return 'Archived';
   }
 
-  /**
-   * 5. Single Event details for Admin with full relations
-   */
   async getAdminEventById(id: string) {
     const event = await this.prisma.event.findUnique({
       where: { id },
@@ -510,10 +492,8 @@ export class AdminService {
       throw new NotFoundException(`Event with ID ${id} not found`);
     }
 
-    // Dynamic calculations from database relations
     const totalInvitees = event.attendees.length;
 
-    // Categorize RSVP statuses dynamically from attendee database relations
     const confirmedCount = event.attendees.filter(
       (a) => a.status === 'ATTENDING' || a.notes?.toLowerCase().includes('confirmed'),
     ).length;
@@ -535,13 +515,11 @@ export class AdminService {
       totalInvitees - (confirmedCount + tentativeCount + declinedCount + checkedInCount),
     );
 
-    // Calculate percentages
     const confirmedPct = totalInvitees > 0 ? Math.round((confirmedCount / totalInvitees) * 100) : 0;
     const tentativePct = totalInvitees > 0 ? Math.round((tentativeCount / totalInvitees) * 100) : 0;
     const declinedPct = totalInvitees > 0 ? Math.round((declinedCount / totalInvitees) * 100) : 0;
     const noResponsePct = totalInvitees > 0 ? Math.round((noResponseCount / totalInvitees) * 100) : 0;
 
-    // Countdown calculation
     const now = new Date().getTime();
     const target = new Date(event.startDate).getTime();
     const diff = Math.max(0, target - now);
@@ -551,7 +529,6 @@ export class AdminService {
       minutes: Math.floor((diff / 1000 / 60) % 60),
     };
 
-    // Determine organizer details
     let organizerName = event.organizer.fullName;
     let organizerType = 'Individual';
     let billingPlan = 'Essential Event Pass';
@@ -570,9 +547,7 @@ export class AdminService {
       event: {
         id: event.id,
         title: event.title,
-        status: event.status, // e.g. "DRAFT", "LIVE", "PUBLISHED"
-        category: event.category, // e.g. "Gala"
-        description: event.description,
+        status: event.status,         category: event.category,         description: event.description,
         startDate: event.startDate,
         endDate: event.endDate,
         timezone: event.timezone,
@@ -633,9 +608,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * Consolidated Telemetry combining relational data
-   */
   async getMetrics() {
     const [summary, breakdown, revenueTable, activeEvents] = await Promise.all([
       this.getDashboardSummary(),
@@ -671,7 +643,6 @@ export class AdminService {
         const parsed = JSON.parse(row.value) as { planName?: string };
         if (parsed.planName) names.set(row.key.replace('PLAN_USER_', ''), parsed.planName);
       } catch {
-        // Skip a plan record that is not valid JSON.
       }
     }
     return names;
@@ -682,7 +653,6 @@ export class AdminService {
     const limitNum = Math.max(1, Number(filter?.limit) || 10);
     const skip = (pageNum - 1) * limitNum;
 
-    // Base condition: only organizers (Individual, Agency, Venue)
     const baseRoles = [
       UserRole.INDIVIDUAL,
       UserRole.AGENCY,
@@ -693,7 +663,6 @@ export class AdminService {
       role: { in: baseRoles },
     };
 
-    // Filter by Type
     if (filter?.type && filter.type !== FilterOrganizerType.ALL) {
       if (filter.type === FilterOrganizerType.INDIVIDUAL) {
         whereClause.role = UserRole.INDIVIDUAL;
@@ -704,7 +673,6 @@ export class AdminService {
       }
     }
 
-    // Filter by Status
     if (filter?.status && filter.status !== FilterOrganizerStatus.ALL) {
       const statusUpper = filter.status.toUpperCase();
       if (statusUpper in UserStatus) {
@@ -712,7 +680,6 @@ export class AdminService {
       }
     }
 
-    // Keyword Search across Name, Email, Agency Name, Venue Property Name
     if (filter?.search && filter.search.trim()) {
       const q = filter.search.trim();
       whereClause.OR = [
@@ -799,9 +766,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * Retrieve Single Organization / Organizer by UUID with all relations
-   */
   async getOrganizerById(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -1022,13 +986,7 @@ export class AdminService {
     };
   }
 
-  /**
-   * REVENUE & PLANS DOMAIN METHODS
-   */
 
-  /**
-   * 1. 4 KPI Cards for Revenue & Plans Overview (Pure DB Metrics)
-   */
   async getRevenueOverview() {
     const now = new Date();
     const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -1099,9 +1057,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 2. Monthly Revenue Breakdown Chart (Aggregated DB Data)
-   */
   async getRevenueBreakdown(period: string = 'Yearly') {
     const now = new Date();
     const yearly = period !== 'Monthly';
@@ -1156,9 +1111,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 3. Revenue transactions: ticket orders plus organizer plan payments.
-   */
   async getRevenueTransactions(
     status: string = 'All',
     search?: string,
@@ -1300,9 +1252,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 4. Single Consolidated Endpoint: Get everything for Revenue
-   */
   async getAllRevenueData() {
     const [overview, breakdown, transactions, plans] = await Promise.all([
       this.getRevenueOverview(),
@@ -1319,10 +1268,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * Organizer plan payments are stored as JSON on PlatformSetting
-   * (BILLING_HISTORY_* and PLAN_USER_*), not as ticket orders.
-   */
   private async loadOrganizerBilling(): Promise<{
     charges: PlanCharge[];
     activeSubscriptions: number;
@@ -1562,9 +1507,6 @@ export class AdminService {
     return Number.isFinite(amount) ? amount : 0;
   }
 
-  /**
-   * 5. PLATFORM SETTINGS DOMAIN METHODS
-   */
   async getPlatformSettings() {
     const settings = await this.prisma.platformSetting.findMany({
       where: {
@@ -1836,13 +1778,7 @@ export class AdminService {
     };
   }
 
-  /**
-   * 6. ANALYTICS DOMAIN METHODS (Pure Relational DB Data)
-   */
 
-  /**
-   * 6.1 Top 6 KPI Cards for Platform Analytics
-   */
   async getAnalyticsOverview() {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -1901,9 +1837,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 6.2 Organizer Growth Over Time (by Individual, Agency, Venue)
-   */
   async getOrganizerGrowth(range: string = '6_months') {
     const monthsCount = range === '12_months' ? 12 : 6;
     const now = new Date();
@@ -1959,9 +1892,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 6.3 Events Created Over Time
-   */
   async getEventsCreatedOverTime(range: string = '6_months') {
     const monthsCount = range === '12_months' ? 12 : 6;
     const now = new Date();
@@ -2002,9 +1932,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 6.4 Voice RSVP Adoption Breakdown (Button, Voice Note, Text Reply)
-   */
   async getVoiceRsvpAdoption() {
     return this.classifyRsvpChannels();
   }
@@ -2054,9 +1981,6 @@ export class AdminService {
     };
   }
 
-  /**
-   * 6.5 Consolidated Analytics Payload (All in one)
-   */
   async getAllAnalyticsData(range: string = '6_months') {
     const [overview, organizerGrowth, eventsCreated, voiceRsvpAdoption] = await Promise.all([
       this.getAnalyticsOverview(),

@@ -17,9 +17,6 @@ export class IndividualDashboardService {
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  /**
-   * Resolve relational User record for individual organizer
-   */
   private async resolveUser(userId?: string): Promise<IndividualUserDto | null> {
     if (!userId) return null;
     try {
@@ -42,9 +39,6 @@ export class IndividualDashboardService {
     }
   }
 
-  /**
-   * Main relational individual organizer dashboard overview
-   */
   async getDashboardOverview(userId?: string): Promise<IndividualDashboardResponseDto> {
     const user = await this.resolveUser(userId);
     if (!user) {
@@ -52,7 +46,6 @@ export class IndividualDashboardService {
     }
     const targetUserId = user.id;
 
-    // 1. Relational Active Event Query with relations
     let activeEvent: any = null;
     try {
       if (targetUserId) {
@@ -93,7 +86,6 @@ export class IndividualDashboardService {
       this.logger.error(`Error querying active event: ${err.message}`);
     }
 
-    // 2. Relational Checklist Progress Computed from Database Columns
     const basicsCompleted = Boolean(activeEvent?.title && activeEvent?.startDate && activeEvent?.category);
     const detailsCompleted = Boolean(activeEvent?.description && (activeEvent?.venueName || activeEvent?.isVirtual));
     const guestsConfigured = Boolean((activeEvent?.ticketTiers?.length || 0) > 0 || (activeEvent?._count?.attendees || 0) > 0);
@@ -127,7 +119,6 @@ export class IndividualDashboardService {
       steps,
     };
 
-    // 3. Relational Metrics & Aggregations
     let totalEvents = 0;
     let draftEvents = 0;
     let liveEvents = 0;
@@ -196,7 +187,6 @@ export class IndividualDashboardService {
       totalRevenue,
     };
 
-    // 4. Relational Recent Attendees
     let recentAttendees: IndividualRecentAttendeeDto[] = [];
     try {
       const attendeeFilter = activeEvent?.id
@@ -222,7 +212,6 @@ export class IndividualDashboardService {
       this.logger.error(`Error querying recent attendees: ${err.message}`);
     }
 
-    // 5. Relational Recent Orders
     let recentOrders: IndividualRecentOrderDto[] = [];
     try {
       const orderFilter = activeEvent?.id
@@ -259,9 +248,6 @@ export class IndividualDashboardService {
     };
   }
 
-  /**
-   * List all events for the individual organizer from relational database
-   */
   async getEvents(userId?: string) {
     const user = await this.resolveUser(userId);
     const targetUserId = user?.id;
@@ -282,9 +268,6 @@ export class IndividualDashboardService {
     });
   }
 
-  /**
-   * List attendees for the individual organizer's events from relational database
-   */
   async getAttendees(userId?: string) {
     const user = await this.resolveUser(userId);
     const targetUserId = user?.id;
@@ -310,9 +293,6 @@ export class IndividualDashboardService {
     });
   }
 
-  /**
-   * Relational metrics only
-   */
   async getMetrics(userId?: string): Promise<IndividualMetricsDto> {
     const overview = await this.getDashboardOverview(userId);
     return overview.metrics;

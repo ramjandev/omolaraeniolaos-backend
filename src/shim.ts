@@ -1,6 +1,5 @@
 import 'reflect-metadata';
 
-// Defensive shim for runtime environments (such as tsx / esbuild) where TypeScript decorator metadata is not emitted
 const originalGetMetadata = (Reflect as any).getMetadata;
 if (originalGetMetadata) {
   (Reflect as any).getMetadata = function (metadataKey: any, target: any, propertyKey?: any) {

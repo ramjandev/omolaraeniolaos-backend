@@ -15,7 +15,6 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     await this.ensureDefaultAdmin();
   }
 
-  /** Render Postgres can take a while to wake. Retry before serving requests. */
   private async connectWithRetry() {
     const delays = [0, 2000, 5000, 10000];
     for (let attempt = 0; attempt < delays.length; attempt += 1) {
@@ -41,7 +40,6 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     } catch {}
   }
 
-  /** Creates the platform admin once. Never overwrites an existing account. */
   private async ensureDefaultAdmin() {
     const email = (process.env.ADMIN_EMAIL || DEFAULT_ADMIN_EMAIL).toLowerCase().trim();
     const password = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;

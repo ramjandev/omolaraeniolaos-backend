@@ -46,7 +46,6 @@ export class IndividualBillingService {
     try {
       await this.authService.reconcilePlanPayments(userId);
     } catch {
-      // Billing still loads if Flutterwave cannot be reached.
     }
 
     const [user, planSetting, historySetting] = await Promise.all([

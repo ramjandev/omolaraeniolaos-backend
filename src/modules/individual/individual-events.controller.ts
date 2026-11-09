@@ -144,10 +144,6 @@ export class IndividualEventsController {
     return this.eventsService.deleteEvent(id, user?.id);
   }
 
-  // ---------------------------------------------------------------------------
-  // GUEST ROSTER & RSVP MANAGEMENT
-  // ---------------------------------------------------------------------------
-
   @Get(':id/guests')
   @ResponseMessage('Guest roster retrieved successfully')
   @ApiOperation({
@@ -270,10 +266,6 @@ export class IndividualEventsController {
     return this.eventsService.sendGuestReminder(id, guestId);
   }
 
-  // ---------------------------------------------------------------------------
-  // SEATING PROTOCOL & TABLE ASSIGNMENTS
-  // ---------------------------------------------------------------------------
-
   @Post(':id/seating')
   @ResponseMessage('Seating table created successfully')
   @ApiOperation({
@@ -332,10 +324,6 @@ export class IndividualEventsController {
   ) {
     return this.eventsService.assignGuestSeating(id, dto);
   }
-
-  // ---------------------------------------------------------------------------
-  // LIVE TURNSTILE MONITOR & SECURITY TELEMETRY
-  // ---------------------------------------------------------------------------
 
   @Get(':id/check-in')
   @ResponseMessage('Live check-in monitor telemetry retrieved successfully')

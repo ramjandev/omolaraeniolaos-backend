@@ -302,7 +302,6 @@ export class VenueService {
         WHERE id = ${id}
       `;
     } catch {
-      // Columns are added by the schema push. The space itself is already saved.
     }
   }
 

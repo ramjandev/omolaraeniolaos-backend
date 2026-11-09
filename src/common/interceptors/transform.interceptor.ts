@@ -32,7 +32,6 @@ export class TransformInterceptor<T> implements NestInterceptor<T, ApiResponse<T
         let message = customMessage || 'Request processed successfully';
         let responseData = data;
 
-        // If service returns an object with custom message and data properties, extract gracefully
         if (
           data &&
           typeof data === 'object' &&

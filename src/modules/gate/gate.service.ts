@@ -95,10 +95,6 @@ export class GateService {
     };
   }
 
-  /**
-   * The signed-in gate account, and their assigned gate when the scanner
-   * did not send one. Also records that this phone is open.
-   */
   private async staffContext(userId?: string, staffId?: string, gate?: string) {
     let profile = staffId
       ? await this.prisma.gateStaffProfile.findFirst({
@@ -149,9 +145,6 @@ export class GateService {
     });
   }
 
-  /**
-   * Assigned events, recent scans, and profile for the signed-in gate staff member.
-   */
   async getWorkspace(userId?: string) {
     if (!userId) {
       throw new BadRequestException('Sign in as gate staff');

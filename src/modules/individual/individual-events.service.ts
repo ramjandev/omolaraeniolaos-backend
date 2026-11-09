@@ -39,10 +39,8 @@ import { readOrganizerAdmins, saveOrganizerAdmin } from '../agency/organizer-adm
 export class IndividualEventsService {
   private readonly logger = new Logger(IndividualEventsService.name);
 
-  // In-memory setup steps cache per event (allows interactive wizard tracking)
   private readonly setupStepsState = new Map<string, boolean[]>();
 
-  // In-memory flagged exceptions cache for live turnstile monitor
   private readonly flaggedExceptionsMap = new Map<string, any[]>();
 
   constructor(
@@ -52,9 +50,6 @@ export class IndividualEventsService {
     @Inject(IndividualGateService) private readonly gate: IndividualGateService,
   ) {}
 
-  /**
-   * Resolve individual organizer user
-   */
   private async resolveUser(userId?: string) {
     if (!userId) return null;
     try {
@@ -64,9 +59,6 @@ export class IndividualEventsService {
     }
   }
 
-  /**
-   * Helper: Resolve single event by id, slug, or fallback '1'/'active'
-   */
   private async resolveEvent(idOrSlug: string, organizerId?: string): Promise<any> {
     if (idOrSlug && idOrSlug !== '1' && idOrSlug !== 'active') {
       const byId = await this.prisma.event.findUnique({
@@ -92,7 +84,6 @@ export class IndividualEventsService {
       if (bySlug) return bySlug;
     }
 
-    // Fallback: Find organizer's active or first event
     const organizer = await this.resolveUser(organizerId);
     if (organizer) {
       const first = await this.prisma.event.findFirst({
@@ -111,9 +102,6 @@ export class IndividualEventsService {
     throw new NotFoundException('Event not found. Create an event first.');
   }
 
-  /**
-   * 1. GET ALL EVENTS for individual organizer
-   */
   async getEvents(userId?: string, query?: FilterIndividualEventsDto) {
     const user = await this.resolveUser(userId);
     if (!user) {
@@ -175,7 +163,6 @@ export class IndividualEventsService {
         Math.floor((diffTime % (1000 * 60 * 60)) / (1000 * 60)),
       );
 
-      // Status mapping for individual frontend
       let uiStatus: 'active' | 'draft' | 'completed' = 'draft';
       if (ev.status === EventStatus.LIVE || ev.status === EventStatus.PUBLISHED) {
         uiStatus = 'active';
@@ -239,9 +226,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 2. GET SINGLE EVENT WORKSPACE DETAILS (Metadata, 4 KPIs, Countdown, Checklist)
-   */
   async getEventById(id: string, userId?: string) {
     const ev = await this.resolveEvent(id, userId);
     const now = new Date();
@@ -271,7 +255,6 @@ export class IndividualEventsService {
       (a: any) => a.status === AttendeeStatus.CHECKED_IN,
     ).length;
 
-    // Retrieve or initialize setup checklist state (6 steps)
     const eventKey = ev.id;
     if (!this.setupStepsState.has(eventKey)) {
       this.setupStepsState.set(eventKey, [true, false, false, false, false, false]);
@@ -382,9 +365,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 3. CREATE EVENT (Wizard step handler)
-   */
   async createEvent(userId: string | undefined, dto: CreateIndividualEventDto) {
     const user = await this.resolveUser(userId);
     if (!user) {
@@ -399,9 +379,7 @@ export class IndividualEventsService {
     const startDate = new Date(dto.startDate);
     const endDate = dto.endDate
       ? new Date(dto.endDate)
-      : new Date(startDate.getTime() + 1000 * 60 * 60 * 5); // default 5 hours duration
-
-    const agencyClientId = await this.resolveAgencyClient(user.id, dto);
+      : new Date(startDate.getTime() + 1000 * 60 * 60 * 5);     const agencyClientId = await this.resolveAgencyClient(user.id, dto);
     const venueSpace = dto.venueSpaceId
       ? await this.prisma.venueSpace.findFirst({
           where: { id: dto.venueSpaceId, venue: { userId: user.id } },
@@ -437,7 +415,6 @@ export class IndividualEventsService {
       },
     });
 
-    // Initialize 6 checklist steps
     this.setupStepsState.set(event.id, [true, false, false, false, false, false]);
     if (venueSpace && dto.clientName?.trim()) {
       await this.prisma.venueBooking.create({
@@ -609,9 +586,6 @@ export class IndividualEventsService {
     });
   }
 
-  /**
-   * 4. UPDATE EVENT
-   */
   async updateEvent(id: string, userId: string | undefined, dto: UpdateIndividualEventDto) {
     const ev = await this.resolveEvent(id, userId);
 
@@ -636,9 +610,6 @@ export class IndividualEventsService {
     });
   }
 
-  /**
-   * 5. UPDATE SETUP CHECKLIST STEP
-   */
   async updateSetupStep(
     id: string,
     userId: string | undefined,
@@ -664,9 +635,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 6. PUBLISH / ACTIVATE EVENT
-   */
   async publishOrActivateEvent(id: string, userId?: string) {
     const ev = await this.resolveEvent(id, userId);
 
@@ -684,9 +652,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 7. DELETE EVENT
-   */
   async deleteEvent(id: string, userId?: string) {
     const ev = await this.resolveEvent(id, userId);
     await this.prisma.event.delete({ where: { id: ev.id } });
@@ -695,9 +660,6 @@ export class IndividualEventsService {
     return { success: true, id: ev.id, message: 'Event successfully removed' };
   }
 
-  /**
-   * 8. GET GUEST ROSTER
-   */
   async getEventGuests(
     eventId: string,
     query?: { search?: string; status?: string; type?: string },
@@ -737,7 +699,6 @@ export class IndividualEventsService {
       };
     });
 
-    // Apply filtering
     if (query?.search) {
       const q = query.search.toLowerCase();
       guests = guests.filter(
@@ -779,13 +740,9 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 9. ADD SINGLE GUEST
-   */
   async addGuest(eventId: string, dto: AddIndividualGuestDto) {
     const ev = await this.resolveEvent(eventId);
 
-    // Find or pick corresponding ticket tier
     let tier = ev.ticketTiers.find((t) =>
       dto.type?.toUpperCase().includes('VIP')
         ? t.type === TicketTierType.VIP
@@ -869,9 +826,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 10. BULK ADD GUESTS
-   */
   async bulkAddGuests(eventId: string, dto: BulkAddIndividualGuestsDto) {
     const results = [];
     let sent = 0;
@@ -901,9 +855,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 11. UPDATE GUEST
-   */
   async updateGuest(eventId: string, guestId: string, dto: UpdateIndividualGuestDto) {
     const attendee = await this.prisma.attendee.findUnique({
       where: { id: guestId },
@@ -940,17 +891,11 @@ export class IndividualEventsService {
     return updated;
   }
 
-  /**
-   * 12. DELETE GUEST
-   */
   async deleteGuest(eventId: string, guestId: string) {
     await this.prisma.attendee.delete({ where: { id: guestId } });
     return { success: true, guestId, message: 'Guest deleted successfully' };
   }
 
-  /**
-   * 13. SEND GUEST INVITATION
-   */
   async sendAllInvites(eventId: string, guestIds?: string[]) {
     const ev = await this.resolveEvent(eventId);
     const chosen = (guestIds || []).map((id) => id.trim()).filter(Boolean);
@@ -1031,9 +976,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 14. SEND GUEST REMINDER
-   */
   async sendGuestReminder(eventId: string, guestId: string) {
     const deliveries = await this.communicationsService.dispatchReminder(
       eventId,
@@ -1047,9 +989,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 15. GET SEATING BLUEPRINT & TABLE PROTOCOL
-   */
   async createEventSeating(eventId: string, dto: CreateSeatingDto) {
     const ev = await this.resolveEvent(eventId);
     const capacity = Math.max(1, Number(dto.capacity) || 1);
@@ -1217,9 +1156,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 16. ASSIGN GUEST SEATING
-   */
   async assignGuestSeating(eventId: string, dto: AssignGuestSeatingDto) {
     const ev = await this.resolveEvent(eventId);
     const attendee = await this.prisma.attendee.findFirst({
@@ -1303,9 +1239,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 17. GET EVENT CHECK-IN LIVE MONITOR TELEMETRY
-   */
   async getEventCheckInMonitor(eventId: string) {
     const ev = await this.resolveEvent(eventId);
 
@@ -1465,9 +1398,6 @@ export class IndividualEventsService {
     };
   }
 
-  /**
-   * 18. RESOLVE CHECK-IN FLAG EXCEPTION
-   */
   async resolveCheckInFlag(eventId: string, dto: ResolveFlagDto) {
     const ev = await this.resolveEvent(eventId);
     await this.prisma.checkInException.updateMany({
@@ -1516,7 +1446,6 @@ export class IndividualEventsService {
           reservedSeats: Math.max(0, Number(parsed.reservedSeats) || 0),
         };
       } catch {
-        // Older zones store a plain name.
       }
     }
     return { name: zoneName, guestGroup: 'General', location: '', reservedSeats: 0 };
@@ -1577,9 +1506,6 @@ export class IndividualEventsService {
     return 'WhatsApp';
   }
 
-  /**
-   * 19. ASSIGN ALL GATE STAFF (Turnstile crew broadcast)
-   */
   async assignAllGateStaff(eventId: string) {
     const ev = await this.resolveEvent(eventId);
 

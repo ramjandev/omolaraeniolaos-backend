@@ -1,8 +1,3 @@
-// =============================================================================
-// Backend TypeScript Domain Models & Enums
-// Independent of @prisma/client generation for zero-crash startup
-// =============================================================================
-
 export enum UserRole {
   ADMIN = 'ADMIN',
   INDIVIDUAL = 'INDIVIDUAL',

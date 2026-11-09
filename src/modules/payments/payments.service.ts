@@ -200,7 +200,6 @@ export class PaymentsService {
     let resolvedTxRef: string | null = null;
 
     try {
-      // Determine if numeric ID or reference string
       const isNumeric = /^\d+$/.test(rawId);
       const url = isNumeric
         ? `https://api.flutterwave.com/v3/transactions/${rawId}/verify`
@@ -228,7 +227,6 @@ export class PaymentsService {
       this.logger.error(`Flutterwave verification request error: ${err.message}`);
     }
 
-    // Lookup order in database by tx_ref, orderNumber, or transactionRef
     const lookupRef = resolvedTxRef || rawId;
     let order = await this.prisma.order.findFirst({
       where: {

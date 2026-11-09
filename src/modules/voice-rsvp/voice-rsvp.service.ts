@@ -44,9 +44,6 @@ export class VoiceRsvpService {
     return '';
   }
 
-  /**
-   * Transcribe a short guest voice note with the Gemini free tier.
-   */
   async transcribeAudio(
     audioBase64: string,
     mimeType: string = 'audio/webm',
@@ -194,34 +191,19 @@ export class VoiceRsvpService {
     return String(message).replace(/\s+/g, ' ').slice(0, 240);
   }
 
-  /**
-   * 2. Multilingual Natural Language RSVP Intent Extractor
-   * Supports English, Yoruba, Igbo, Hausa, & Nigerian Pidgin
-   */
   parseRsvpIntent(transcript: string): RsvpIntentResult {
     const text = transcript.toLowerCase();
 
-    // Confirm signals (English, Yoruba, Igbo, Hausa, Pidgin)
     const confirmKeywords = [
       'attend', 'attending', 'coming', 'come', 'yes', 'honored', 'gladly',
       'count me in', 'pleasure', 'be there', 'looking forward',
-      'mo ma wa', 'a ma wa', 'mo n bo', // Yoruba
-      'aga m bia', 'anyi ga-abia', // Igbo
-      'zan zo', 'za mu zo', // Hausa
-      'i dey come', 'we dey come', 'i go dey there', 'surely', // Pidgin
-    ];
+      'mo ma wa', 'a ma wa', 'mo n bo',       'aga m bia', 'anyi ga-abia',       'zan zo', 'za mu zo',       'i dey come', 'we dey come', 'i go dey there', 'surely',     ];
 
-    // Decline signals
     const declineKeywords = [
       'cannot', 'can not', "can't", "won't", 'sorry', 'regret', 'decline',
       'unable', 'unfortunately', 'traveling', 'busy', 'miss',
-      'mi o le wa', 'ko le wa', // Yoruba
-      'a gaghị m enwe ike', 'agaghị m abịa', // Igbo
-      'ba zan iya zuwa ba', // Hausa
-      'i no go fit', 'i no fit come', // Pidgin
-    ];
+      'mi o le wa', 'ko le wa',       'a gaghị m enwe ike', 'agaghị m abịa',       'ba zan iya zuwa ba',       'i no go fit', 'i no fit come',     ];
 
-    // Tentative signals
     const tentativeKeywords = ['maybe', 'not sure', 'might', 'tentative', 'try to'];
 
     let status: 'CONFIRMED' | 'DECLINED' | 'TENTATIVE' = 'CONFIRMED';
@@ -234,7 +216,6 @@ export class VoiceRsvpService {
       status = 'CONFIRMED';
     }
 
-    // Guest Count Extractor
     let guestCount = 1;
     if (
       text.includes('plus one') ||
@@ -263,7 +244,6 @@ export class VoiceRsvpService {
       guestCount = 4;
     }
 
-    // Dietary & Special Requests Extractor
     const notes: string[] = [];
     if (text.includes('vegetarian')) notes.push('Vegetarian');
     if (text.includes('vegan')) notes.push('Vegan');
@@ -279,9 +259,6 @@ export class VoiceRsvpService {
     };
   }
 
-  /**
-   * 3. End-to-End Voice RSVP Processing & Attendee Record Updating
-   */
   async processVoiceRsvp(dto: TranscribeVoiceDto) {
     const { transcript, confidence, languageDetected } =
       await this.transcribeAudio(dto.audioBase64, dto.mimeType, dto.languageCode);

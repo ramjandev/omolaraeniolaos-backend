@@ -207,7 +207,6 @@ export class AuthService {
       }
     }
 
-    // Always return success message to protect against user enumeration
     return { sent: true };
   }
 
@@ -428,7 +427,6 @@ export class AuthService {
           if (typeof parsed[key] === 'boolean') notifications[key] = parsed[key];
         }
       } catch {
-        // Keep the defaults when the stored value is unreadable.
       }
     }
     return {
@@ -514,7 +512,6 @@ export class AuthService {
     return { deleted: true };
   }
 
-  /** Looks up an active plan by cuid or slug. Returns null when no such plan exists. */
   async resolvePlan(planId?: string): Promise<ResolvedPlan | null> {
     if (!planId) return null;
     const plan = await this.prisma.plan.findFirst({
@@ -530,7 +527,6 @@ export class AuthService {
     };
   }
 
-  /** Annual billing charges 12 months at a 20% discount. */
   private applyBillingCycle(plan: ResolvedPlan | null, billingCycle?: string): ResolvedPlan | null {
     if (!plan) return null;
     const isAnnual = billingCycle?.toLowerCase() === 'annual';
@@ -541,7 +537,6 @@ export class AuthService {
     };
   }
 
-  /** Appends a plan charge so the individual billing page can list past invoices. */
   private async recordBillingHistory(
     userId: string,
     entry: {
@@ -591,10 +586,6 @@ export class AuthService {
     });
   }
 
-  /**
-   * Flutterwave confirms the charge. No admin review is required.
-   * Pending invoices that match a successful transaction become Paid.
-   */
   async reconcilePlanPayments(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -733,7 +724,6 @@ export class AuthService {
     });
   }
 
-  /** Stores the plan chosen at signup and starts checkout when payment is due. */
   private async assignRegistrationPlan(
     user: { id: string; email: string; fullName: string; phone?: string | null },
     plan: ResolvedPlan | null,
@@ -852,10 +842,6 @@ export class AuthService {
     return null;
   }
 
-  /**
-   * 1. Multi-Step Registration: Individual Organizer
-   * Handles Steps 1-5: User Account, Initial Event Setup, Plan Selection, and Activation/Payment
-   */
   async registerIndividual(dto: RegisterOrganizerIndividualDto) {
     if (dto.confirmPassword && dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Confirm password does not match password');
@@ -871,7 +857,6 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.password, salt);
     const plan = await this.resolvePlan(dto.planId);
 
-    // Parse event date, start time, and optional end time
     const baseDate = new Date(dto.eventDate);
     const validBase = isNaN(baseDate.getTime()) ? new Date() : baseDate;
 
@@ -903,10 +888,8 @@ export class AuthService {
         endDate.setDate(endDate.getDate() + 1);
       }
     } else {
-      endDate.setTime(startDate.getTime() + 4 * 60 * 60 * 1000); // Default 4 hours duration
-    }
+      endDate.setTime(startDate.getTime() + 4 * 60 * 60 * 1000);     }
 
-    // Generate unique slug for the event
     const cleanSlugBase = (dto.eventName || 'event')
       .toLowerCase()
       .trim()
@@ -916,7 +899,6 @@ export class AuthService {
 
     const guestCapacity = Number(dto.expectedGuests) || 150;
 
-    // Create user and initial event atomically
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -1005,11 +987,6 @@ export class AuthService {
     };
   }
 
-  /**
-   * 2. Multi-Step Registration: Agency Organizer
-   * Handles Steps 1-5: Lead User Account, Agency Workspace Profile, Work Scope & Templates,
-   * Team Member Invitations, Plan Selection, and Checkout / Dashboard skip.
-   */
   async registerAgency(dto: RegisterOrganizerAgencyDto) {
     if (dto.confirmPassword && dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Confirm password does not match password');
@@ -1032,7 +1009,6 @@ export class AuthService {
       .filter(Boolean)
       .join(', ');
 
-    // Atomically create User, AgencyProfile, and UserProfile
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -1065,7 +1041,6 @@ export class AuthService {
 
     const agencyProfile = user.agencyProfile!;
 
-    // Save full agency workspace configuration (event types, volume, team size)
     await this.prisma.platformSetting.upsert({
       where: { key: `AGENCY_CONFIG_${agencyProfile.id}` },
       update: {
@@ -1100,7 +1075,6 @@ export class AuthService {
       },
     });
 
-    // Save pending team invitations from Step 3
     if (dto.invitedMembers && dto.invitedMembers.length > 0) {
       await this.prisma.platformSetting.upsert({
         where: { key: `AGENCY_INVITATIONS_${agencyProfile.id}` },
@@ -1153,11 +1127,6 @@ export class AuthService {
     };
   }
 
-  /**
-   * 3. Multi-Step Registration: Venue Organizer
-   * Handles Steps 1-5: Business Information, Primary Venue Setup, Spaces & Halls,
-   * Team Member Invitations, Plan Selection, and Checkout / Dashboard Skip.
-   */
   async registerVenue(dto: RegisterOrganizerVenueDto) {
     if (dto.confirmPassword && dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Confirm password does not match password');
@@ -1195,7 +1164,6 @@ export class AuthService {
     const venueAddress = dto.address || 'Lagos, Nigeria';
     const primaryVenueName = dto.venueName || dto.businessName;
 
-    // Prepare spaces creation
     const spacesData =
       dto.spaces && dto.spaces.length > 0
         ? dto.spaces.map((s) => ({
@@ -1218,7 +1186,6 @@ export class AuthService {
             },
           ];
 
-    // Atomically create User, VenueProfile, Spaces, and UserProfile
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -1258,7 +1225,6 @@ export class AuthService {
 
     const venueProfile = user.venueProfile!;
 
-    // Save full venue setup metadata
     await this.prisma.platformSetting.upsert({
       where: { key: `VENUE_CONFIG_${venueProfile.id}` },
       update: {
@@ -1297,7 +1263,6 @@ export class AuthService {
       },
     });
 
-    // Save pending team invitations from Step 4
     if (dto.invitedMembers && dto.invitedMembers.length > 0) {
       await this.prisma.platformSetting.upsert({
         where: { key: `VENUE_INVITATIONS_${venueProfile.id}` },
@@ -1357,9 +1322,6 @@ export class AuthService {
     };
   }
 
-  /**
-   * 4. Pay/Upgrade Plan from Portal anytime
-   */
   async payPlan(userId: string, dto: PayPlanDto) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

@@ -10,9 +10,6 @@ import {
 } from 'class-validator';
 
 export class RegisterOrganizerIndividualDto {
-  // ==========================================
-  // Step 1: Create Your McEniesVite Account
-  // ==========================================
   @ApiProperty({
     example: 'James Obi',
     description: 'Full legal or display name',
@@ -52,9 +49,6 @@ export class RegisterOrganizerIndividualDto {
   @IsOptional()
   confirmPassword?: string;
 
-  // ==========================================
-  // Step 2: Let's Set Up Your Event
-  // ==========================================
   @ApiProperty({
     example: 'Golden Jubilee Gala Dinner',
     description: 'Event Name',
@@ -112,9 +106,6 @@ export class RegisterOrganizerIndividualDto {
   @IsNotEmpty()
   venueLocation: string;
 
-  // ==========================================
-  // Step 3 & 4: Package Pricing & Payment Setup
-  // ==========================================
   @ApiPropertyOptional({
     example: 'plan_ind_1',
     description:

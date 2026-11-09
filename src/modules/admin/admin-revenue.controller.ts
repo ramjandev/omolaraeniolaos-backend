@@ -17,10 +17,6 @@ import { ResponseMessage } from '../../common/decorators/response-message.decora
 export class AdminRevenuePlansController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 
-  /**
-   * 1. GET /api/admin/revenue/overview
-   * Returns complete overview telemetry matching Revenue & Plans dashboard page
-   */
   @Get('overview')
   @ResponseMessage('Platform revenue and billing overview retrieved successfully')
   @ApiOperation({
@@ -31,10 +27,6 @@ export class AdminRevenuePlansController {
     return this.adminService.getRevenueOverview();
   }
 
-  /**
-   * 2. GET /api/admin/revenue/breakdown
-   * Monthly revenue chart breakdown (Jan to Dec)
-   */
   @Get('breakdown')
   @ResponseMessage('Monthly revenue breakdown chart data retrieved successfully')
   @ApiOperation({
@@ -46,10 +38,6 @@ export class AdminRevenuePlansController {
     return this.adminService.getRevenueBreakdown(period);
   }
 
-  /**
-   * 3. GET /api/admin/revenue/transactions
-   * Filterable transactions table matching Revenue & Plans page
-   */
   @Get('transactions')
   @ResponseMessage('Revenue transactions retrieved successfully')
   @ApiOperation({
@@ -71,11 +59,6 @@ export class AdminRevenuePlansController {
     return this.adminService.getRevenueTransactions(status, search, page, limit, sort);
   }
 
-  /**
-   * 4. GET /api/admin/revenue/all
-   * Single consolidated endpoint returning everything for revenue:
-   * (Overview KPIs + Monthly Breakdown + Filtered Transactions + Available Plans)
-   */
   @Get('all')
   @ResponseMessage('All consolidated revenue and plans telemetry retrieved successfully')
   @ApiOperation({
@@ -85,10 +68,6 @@ export class AdminRevenuePlansController {
   async getAllRevenueData() {
     return this.adminService.getAllRevenueData();
   }
-
-  // ==========================================
-  // PLANS MANAGEMENT ENDPOINTS (Same Folder)
-  // ==========================================
 
   @Post('plans')
   @UseGuards(JwtAuthGuard, RolesGuard)

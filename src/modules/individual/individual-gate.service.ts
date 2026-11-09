@@ -154,9 +154,6 @@ export class IndividualGateService {
     return this.prisma.user.findUnique({ where: { id: userId } });
   }
 
-  /**
-   * Gate management overview: the organizer's events and the gate staff on shift for them.
-   */
   async getGateOverview(userId?: string): Promise<GateManagementOverviewResponseDto> {
     const user = await this.resolveUser(userId);
     if (!user) {
@@ -252,9 +249,6 @@ export class IndividualGateService {
     return { metrics, staff: staffItems, events };
   }
 
-  /**
-   * Invite a gate staff member. New accounts get a one-time temporary password.
-   */
   async inviteStaff(dto: InviteGateStaffDto, organizerUserId?: string) {
     if (!organizerUserId) {
       throw new BadRequestException('Sign in to invite gate staff');
@@ -342,9 +336,6 @@ export class IndividualGateService {
     };
   }
 
-  /**
-   * Assign one gate staff member to an event and gate post.
-   */
   async assignStaff(dto: AssignGateStaffDto, organizerUserId?: string) {
     if (!organizerUserId) {
       throw new BadRequestException('Sign in to assign gate staff');
@@ -377,9 +368,6 @@ export class IndividualGateService {
     };
   }
 
-  /**
-   * Remove one gate staff member from an event.
-   */
   async unassignStaff(dto: UnassignGateStaffDto, organizerUserId?: string) {
     if (!organizerUserId) {
       throw new BadRequestException('Sign in to update gate staff');
@@ -401,9 +389,6 @@ export class IndividualGateService {
     return { removed: removed.count, staffId: dto.staffId, eventId: dto.eventId };
   }
 
-  /**
-   * Delete a gate staff member from this organizer's roster.
-   */
   async removeStaff(dto: RemoveGateStaffDto, organizerUserId?: string) {
     if (!organizerUserId) {
       throw new BadRequestException('Sign in to update gate staff');
@@ -444,9 +429,6 @@ export class IndividualGateService {
     return { staffId: dto.staffId, deleted: remainingShifts === 0 };
   }
 
-  /**
-   * Assign every gate staff member (or the given subset) to an event.
-   */
   async assignAllStaff(dto: AssignAllGateStaffDto, organizerUserId?: string) {
     if (!organizerUserId) {
       throw new BadRequestException('Sign in to assign gate staff');

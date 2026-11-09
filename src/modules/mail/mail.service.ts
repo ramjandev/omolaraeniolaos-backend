@@ -80,7 +80,6 @@ export class MailService {
     this.logger.log(`🔑 Reset Token: ${resetToken}`);
     this.logger.log(`=========================================`);
 
-    // If Resend API key is provided and not a placeholder, dispatch via Resend REST API
     if (apiKey && !apiKey.startsWith('re_xxxx') && !apiKey.startsWith('re_1234')) {
       try {
         const response = await fetch('https://api.resend.com/emails', {

@@ -64,9 +64,6 @@ export class VenueInvitedMemberDto {
 }
 
 export class RegisterOrganizerVenueDto {
-  // ==========================================
-  // Step 1: Account Creation
-  // ==========================================
   @ApiProperty({
     example: 'Folake Adeleke',
     description: 'Your Name (Venue Manager / Owner)',
@@ -106,9 +103,6 @@ export class RegisterOrganizerVenueDto {
   @IsOptional()
   confirmPassword?: string;
 
-  // ==========================================
-  // Step 1 of 5: Business Information
-  // ==========================================
   @ApiProperty({
     example: 'Lumina Event Studio',
     description: 'Owner/Business Name (or Hospitality Group Name)',
@@ -133,9 +127,6 @@ export class RegisterOrganizerVenueDto {
   @IsNotEmpty()
   businessType: string;
 
-  // ==========================================
-  // Step 2 of 5: Create First Venue (Primary Venue)
-  // ==========================================
   @ApiPropertyOptional({
     example: 'The Monarch Grand Palace',
     description: 'Venue Name',
@@ -176,9 +167,6 @@ export class RegisterOrganizerVenueDto {
   @IsOptional()
   description?: string;
 
-  // ==========================================
-  // Step 3 of 5: Add Spaces & Halls
-  // ==========================================
   @ApiPropertyOptional({
     type: [VenueSpaceItemDto],
     description: 'List of individual spaces, halls, or event suites within the venue',
@@ -189,9 +177,6 @@ export class RegisterOrganizerVenueDto {
   @Type(() => VenueSpaceItemDto)
   spaces?: VenueSpaceItemDto[];
 
-  // ==========================================
-  // Step 4 of 5: Build Your Team
-  // ==========================================
   @ApiPropertyOptional({
     type: [VenueInvitedMemberDto],
     description: 'List of invited team members (Managers, Coordinators, Gate Staff)',
@@ -202,9 +187,6 @@ export class RegisterOrganizerVenueDto {
   @Type(() => VenueInvitedMemberDto)
   invitedMembers?: VenueInvitedMemberDto[];
 
-  // ==========================================
-  // Step 5 of 5: Choose A Plan & Payment
-  // ==========================================
   @ApiPropertyOptional({
     example: 'plan_venue_1',
     description: 'Selected Plan ID: "plan_venue_starter", "plan_venue_1", "plan_venue_pro", or "plan_venue_enterprise"',

@@ -29,9 +29,6 @@ export class AgencyInvitedMemberDto {
 }
 
 export class RegisterOrganizerAgencyDto {
-  // ==========================================
-  // Step 1: Create Your McEniesVite Account
-  // ==========================================
   @ApiProperty({
     example: 'Adebayo Ogunlesi',
     description: 'Your Name (Agency lead / representative)',
@@ -71,9 +68,6 @@ export class RegisterOrganizerAgencyDto {
   @IsOptional()
   confirmPassword?: string;
 
-  // ==========================================
-  // Step 1 of 5: Tell Us About Your Agency
-  // ==========================================
   @ApiProperty({
     example: 'Lumina Event Studio',
     description: 'Agency Name',
@@ -115,9 +109,6 @@ export class RegisterOrganizerAgencyDto {
   @IsOptional()
   city?: string;
 
-  // ==========================================
-  // Step 2 of 5: Tell Us About Your Work
-  // ==========================================
   @ApiPropertyOptional({
     example: ['Weddings', 'Corporate Events', 'Conferences'],
     description: 'Types of events organized (Weddings, Birthdays, Corporate Events, Conferences, Private Parties, Social Gatherings)',
@@ -143,9 +134,6 @@ export class RegisterOrganizerAgencyDto {
   @IsOptional()
   teamSize?: string;
 
-  // ==========================================
-  // Step 3 of 5: Build Your Agency Team
-  // ==========================================
   @ApiPropertyOptional({
     type: [AgencyInvitedMemberDto],
     description: 'List of invited team members with email and assigned role',
@@ -156,9 +144,6 @@ export class RegisterOrganizerAgencyDto {
   @Type(() => AgencyInvitedMemberDto)
   invitedMembers?: AgencyInvitedMemberDto[];
 
-  // ==========================================
-  // Step 4 of 5: Choose A Plan That Fits Your Agency
-  // ==========================================
   @ApiPropertyOptional({
     example: 'plan_agency_pro',
     description: 'Selected Plan ID: "plan_agency_solo" (Solo Planner), "plan_agency_pro" (Agency Pro), or "plan_agency_enterprise" (Enterprise)',
@@ -177,9 +162,6 @@ export class RegisterOrganizerAgencyDto {
   @IsOptional()
   billingCycle?: string;
 
-  // ==========================================
-  // Step 5 of 5: Complete Your Setup & Payment
-  // ==========================================
   @ApiPropertyOptional({
     example: false,
     description: 'Whether user clicked "Skip to Dashboard ->" to skip payment and pay later from dashboard',

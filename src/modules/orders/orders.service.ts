@@ -56,8 +56,7 @@ export class OrdersService {
       }
     }
 
-    const platformFee = Math.round(totalAmount * 0.05); // 5% platform take-rate
-    const netAmount = totalAmount - platformFee;
+    const platformFee = Math.round(totalAmount * 0.05);     const netAmount = totalAmount - platformFee;
     const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
     const transactionRef = `TXN-${crypto.randomBytes(8).toString('hex')}`;
 

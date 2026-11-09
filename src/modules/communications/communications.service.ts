@@ -928,7 +928,6 @@ export class CommunicationsService {
       return raw;
     }
     if (raw.startsWith('0') && raw.length === 11) {
-      // BD mobiles are 01X…; NG mobiles are 07X / 08X / 09X.
       if (raw.startsWith('01')) {
         return `880${raw.slice(1)}`;
       }
